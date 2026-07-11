@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Rachana",
+  "version": "0.1.0",
+  "identifier": "io.github.ramakrishnachilaka.rachana",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist",
+    "removeUnusedCommands": true
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Rachana",
+        "width": 1600,
+        "height": 900,
+        "minWidth": 1200,
+        "minHeight": 700,
+        "resizable": true,
+        "center": true,
+        "fullscreen": false,
+        "alwaysOnTop": false,
+        "decorations": false,
+        "transparent": false,
+        "skipTaskbar": false,
+        "dragDropEnabled": true,
+        "theme": null,
+        "titleBarStyle": "Visible",
+        "hiddenTitle": true,
+        "acceptFirstMouse": false,
+        "tabbingIdentifier": null,
+        "additionalBrowserArgs": null,
+        "userAgent": null,
+        "visible": false,
+        "focus": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "Productivity",
+    "shortDescription": "A private, local-first workspace for ideas and visual canvases.",
+    "longDescription": "Rachana is a private desktop workspace for creating, organizing, and editing visual canvases stored on your own device.",
+    "copyright": "Copyright © 2026 Rachana Contributors",
+    "fileAssociations": [
+      {
+        "ext": ["excalidraw"],
+        "name": "Excalidraw Drawing",
+        "description": "Excalidraw drawing",
+        "mimeType": "application/vnd.excalidraw+json",
+        "role": "Editor",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "io.github.ramakrishnachilaka.rachana.excalidraw",
+          "conformsTo": ["public.json"]
+        }
+      }
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

@@ -1,0 +1,240 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-macos:
+    name: Build macOS DMG
+    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && vars.RACHANA_MACOS_RELEASE_ENABLED == 'true' }}
+    runs-on: macos-15
+    environment: release
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+      APP_NAME: Rachana
+      MACOS_SIGNED_RELEASE: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Import Developer ID signing certificate
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/developer-id-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+          test -n "$APPLE_TEAM_ID"
+          test -n "$DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64"
+          test -n "$DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD"
+
+          echo "$DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id-application.p12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$RUNNER_TEMP/developer-id-application.p12" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security default-keychain -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Prepare notarization credentials
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APPLE_API_KEY_ID"
+          test -n "$APPLE_API_ISSUER"
+          test -n "$APPLE_API_PRIVATE_KEY_BASE64"
+
+          APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo "$APPLE_API_PRIVATE_KEY_BASE64" | base64 --decode > "$APPLE_API_KEY_PATH"
+          chmod 600 "$APPLE_API_KEY_PATH"
+          echo "APPLE_API_KEY_PATH=$APPLE_API_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized Apple Silicon DMG
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm run release:mac -- --notarize
+
+      - name: Build unsigned Apple Silicon DMG
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED != 'true' }}
+        run: npm run tauri -- build --bundles app,dmg --target aarch64-apple-darwin
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+
+          mkdir -p dist/github-release
+
+          if [[ "$MACOS_SIGNED_RELEASE" == "true" ]]; then
+            find "dist/releases/macos/Rachana-${GITHUB_REF_NAME}" -maxdepth 1 -type f -print -exec cp {} dist/github-release/ \;
+          else
+            dmg_path="$(find "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle/dmg" -maxdepth 1 -name "*.dmg" -print -quit)"
+            test -n "$dmg_path"
+
+            release_dmg="dist/github-release/Rachana-${GITHUB_REF_NAME}-macos-arm64-unsigned.dmg"
+            cp "$dmg_path" "$release_dmg"
+            checksum="$(shasum -a 256 "$release_dmg" | awk '{print $1}')"
+            printf '%s  %s\n' "$checksum" "$(basename "$release_dmg")" > "$release_dmg.sha256"
+          fi
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rachana-macos-arm64-dmg
+          path: dist/github-release/*
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux AppImage
+    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' }}
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+      RELEASE_DIR: dist/github-release
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install Linux build dependencies
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build Linux AppImage
+        run: npm run tauri -- build --bundles appimage
+
+      - name: Stage release asset
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RELEASE_DIR"
+          appimage_path="$(find "$CARGO_TARGET_DIR/release/bundle/appimage" -maxdepth 1 -name "*.AppImage" -print -quit)"
+          test -n "$appimage_path"
+
+          release_appimage="$RELEASE_DIR/Rachana-${GITHUB_REF_NAME}-linux-x86_64.AppImage"
+          cp "$appimage_path" "$release_appimage"
+          echo "RELEASE_APPIMAGE=$release_appimage" >> "$GITHUB_ENV"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rachana-linux-x86_64-appimage
+          path: ${{ env.RELEASE_APPIMAGE }}
+          if-no-files-found: error
+
+  github-release:
+    name: Create GitHub Release
+    if: ${{ always() && vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && needs.build-linux.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
+    needs:
+      - build-macos
+      - build-linux
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: dist/github-release
+          merge-multiple: true
+
+      - name: List release artifacts
+        run: find dist/github-release -maxdepth 1 -type f -print
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/github-release/*
+          body: |
+            ## Downloads
+
+            - **Linux x86_64:** AppImage
+            - **macOS Apple Silicon:** DMG
+
+            > The macOS DMG is currently unsigned. On first launch, Control-click Rachana in Finder, choose **Open**, then confirm **Open**.
+
+            [View the source for this release](https://github.com/${{ github.repository }}/tree/${{ github.ref_name }})
