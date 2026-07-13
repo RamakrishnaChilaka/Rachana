@@ -81,8 +81,8 @@ For Rust changes, also run `cargo fmt --manifest-path src-tauri/Cargo.toml` and
 the packages listed in `README.md`; report an environment blocker rather than
 claiming success when they are absent.
 
-Current frontend baseline: 24 test files, 145 tests, 69.18% statement coverage,
-65.82% branch coverage, 78.00% function coverage, and 69.58% line coverage.
+Current frontend baseline: 24 test files, 146 tests, 69.31% statement coverage,
+65.82% branch coverage, 78.00% function coverage, and 69.72% line coverage.
 Update this file, `README.md`, and
 `.github/instructions/testing.instructions.md` together whenever test counts or
 coverage change. Update these instructions when architecture or invariants

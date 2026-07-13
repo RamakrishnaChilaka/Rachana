@@ -28,5 +28,5 @@ description: "Use when changing frontend behavior, Excalidraw lifecycle, persist
   native WSL/Tauri rendering is fully verified unless that exact webview workflow
   was reproduced.
 
-Current baseline: 24 test files, 145 tests, 69.18% statement coverage, 65.82%
-branch coverage, 78.00% function coverage, and 69.58% line coverage.
+Current baseline: 24 test files, 146 tests, 69.31% statement coverage, 65.82%
+branch coverage, 78.00% function coverage, and 69.72% line coverage.

@@ -61,8 +61,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-Current frontend baseline: 24 test files, 145 tests, 69.18% statement coverage,
-65.82% branch coverage, 78.00% function coverage, and 69.58% line coverage.
+Current frontend baseline: 24 test files, 146 tests, 69.31% statement coverage,
+65.82% branch coverage, 78.00% function coverage, and 69.72% line coverage.
 
 ### Canvas performance
 
@@ -75,6 +75,10 @@ Use a production build when comparing responsiveness with excalidraw.com.
 React and Excalidraw development builds intentionally include additional checks,
 and a Linux Tauri window under WSLg uses a different webview and graphics stack
 from a Windows browser.
+
+On Windows, `src-tauri/tauri.windows.conf.json` enables WebView2 pinch zoom so
+Precision Touchpad gestures reach Excalidraw's canvas handler. Trackpad pinch
+changes the drawing zoom, not the saved document or application UI scale.
 
 ### Build
 

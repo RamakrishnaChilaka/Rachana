@@ -29,6 +29,9 @@ description: "Use when changing Tauri commands, Rust filesystem behavior, securi
   `useMenuHandler.ts`. Update both sides of a menu command contract together.
 - Linux and macOS window decoration/titlebar behavior differs by Tauri config.
   Check base and platform-specific configs before changing window chrome.
+- Keep Windows `zoomHotkeysEnabled` enabled in `tauri.windows.conf.json`.
+  Wry maps it to WebView2 `IsPinchZoomEnabled`; disabling it prevents Precision
+  Touchpad pinch events from reaching Excalidraw.
 - Preference schema changes require synchronized Rust structs, TypeScript
   conversion helpers, defaults, migration behavior, and tests.
 
