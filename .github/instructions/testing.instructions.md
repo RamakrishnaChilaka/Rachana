@@ -19,6 +19,8 @@ description: "Use when changing frontend behavior, Excalidraw lifecycle, persist
 - For async store changes, include a race where state changes while an IPC call,
   confirmation, or write is pending. Verify both disk-baseline advancement and
   preservation of newer unsaved content.
+- For file-watcher changes, test burst coalescing, an event arriving during an
+  in-flight refresh, and stale directory results.
 - When using fake timers, restore real timers in `afterEach` so later tests are
   isolated.
 - Run the narrowest affected Vitest file immediately after an edit, then run
@@ -28,5 +30,5 @@ description: "Use when changing frontend behavior, Excalidraw lifecycle, persist
   native WSL/Tauri rendering is fully verified unless that exact webview workflow
   was reproduced.
 
-Current baseline: 24 test files, 146 tests, 69.31% statement coverage, 65.82%
-branch coverage, 78.00% function coverage, and 69.72% line coverage.
+Current baseline: 25 test files, 154 tests, 71.13% statement coverage, 67.06%
+branch coverage, 79.95% function coverage, and 71.74% line coverage.

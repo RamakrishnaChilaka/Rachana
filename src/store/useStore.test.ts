@@ -60,6 +60,93 @@ function deletionScope(args: unknown): boolean[] {
   })
 }
 
+describe('file tree refreshes', () => {
+  it('does not apply a result after the current directory changes', async () => {
+    const originalTree = [{
+      name: 'Current.excalidraw',
+      path: '/current/Current.excalidraw',
+      is_directory: false,
+      modified: false,
+    }]
+    const staleTree = [{
+      name: 'Stale.excalidraw',
+      path: '/previous/Stale.excalidraw',
+      is_directory: false,
+      modified: false,
+    }]
+    let resolveTree!: (tree: typeof staleTree) => void
+    mockInvoke.mockImplementation((command) => {
+      if (command === 'get_file_tree') {
+        return new Promise<typeof staleTree>((resolve) => {
+          resolveTree = resolve
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    useStore.setState({
+      currentDirectory: '/previous',
+      fileTree: originalTree,
+    })
+
+    const refresh = useStore.getState().loadFileTree('/previous')
+    await vi.waitFor(() => expect(resolveTree).toBeTypeOf('function'))
+    useStore.setState({ currentDirectory: '/current' })
+    resolveTree(staleTree)
+    await refresh
+
+    expect(useStore.getState().fileTree).toEqual(originalTree)
+  })
+
+  it('keeps the newest result when same-directory refreshes overlap', async () => {
+    const staleTree = [{
+      name: 'Stale.excalidraw',
+      path: '/drawings/Stale.excalidraw',
+      is_directory: false,
+      modified: false,
+    }]
+    const newestTree = [{
+      name: 'Newest.excalidraw',
+      path: '/drawings/Newest.excalidraw',
+      is_directory: false,
+      modified: false,
+    }]
+    let resolveFirst!: (tree: typeof staleTree) => void
+    let resolveSecond!: (tree: typeof newestTree) => void
+    let requestCount = 0
+    mockInvoke.mockImplementation((command) => {
+      if (command === 'get_file_tree') {
+        requestCount += 1
+        return new Promise<typeof staleTree>((resolve) => {
+          if (requestCount === 1) {
+            resolveFirst = resolve
+          } else {
+            resolveSecond = resolve
+          }
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    useStore.setState({
+      currentDirectory: '/drawings',
+      fileTree: [],
+    })
+
+    const firstRefresh = useStore.getState().loadFileTree('/drawings')
+    const secondRefresh = useStore.getState().loadFileTree('/drawings')
+    await vi.waitFor(() => {
+      expect(resolveFirst).toBeTypeOf('function')
+      expect(resolveSecond).toBeTypeOf('function')
+    })
+
+    resolveSecond(newestTree)
+    await secondRefresh
+    resolveFirst(staleTree)
+    await firstRefresh
+
+    expect(useStore.getState().fileTree).toEqual(newestTree)
+  })
+})
+
 describe('tab fallback after deletion', () => {
   it('activates a remaining tab when the active file is deleted', async () => {
     const deletedTab = createTab('Deleted.excalidraw')

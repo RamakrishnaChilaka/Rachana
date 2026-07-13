@@ -20,6 +20,7 @@ type UnsavedChangesDecision = 'save' | 'discard' | 'cancel'
 type FileLoadSource = 'cache' | 'disk' | null
 let nextSaveOperationId = 0
 let nextTabInstanceId = 0
+let nextFileTreeRequestId = 0
 const fileWriteQueues = new Map<string, Promise<void>>()
 const saveAsDestinationClaims = new Set<string>()
 let externalReconciliationQueue = Promise.resolve()
@@ -939,11 +940,20 @@ export const useStore = create<AppStore>((set, get) => ({
 
   // Load file tree only
   loadFileTree: async (dir) => {
+    const requestId = ++nextFileTreeRequestId
     try {
       const fileTree = await invoke<FileTreeNode[]>('get_file_tree', {
         directory: dir,
       })
 
+      const currentDirectory = get().currentDirectory
+      if (
+        requestId !== nextFileTreeRequestId ||
+        currentDirectory === null ||
+        !pathsEqual(currentDirectory, dir)
+      ) {
+        return
+      }
       set({ fileTree })
     } catch (error) {
       console.error('Failed to load file tree:', error)

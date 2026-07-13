@@ -18,6 +18,9 @@ description: "Use when changing React UI, Zustand state, Excalidraw lifecycle, t
   `getActiveDocumentSaveStatus()`; do not create competing booleans.
 - Preferences are cached in Zustand but persisted by Tauri. A preference change
   is incomplete until `savePreferences()` succeeds or the failure is handled.
+- Coalesce native watcher bursts in `useFileSystemChangeListener.ts`. Keep one
+  trailing refresh when events arrive during an in-flight refresh, and reject
+  file-tree results for superseded requests or directories.
 
 ## Excalidraw
 
@@ -28,13 +31,19 @@ description: "Use when changing React UI, Zustand state, Excalidraw lifecycle, t
   element reference identity, as `didSceneElementsChange()` does.
 - `initialData` is stable for one pane instance. A `sceneVersion` key remounts
   the pane when disk content must replace it.
+- Keep every open editor mounted because Excalidraw's unmount lifecycle clears
+  undo history. Inactive panes use `display: none` and Excalidraw view mode to
+  detach edit-only listeners; scroll detection stays disabled for the fixed
+  viewport. React `Activity` also runs Excalidraw's destructive cleanup and must
+  not wrap editor panes.
 - The first restored `onChange` establishes `lastElementsRef`; it is not a user
   edit. Viewport-only callbacks must remain no-ops for persistence.
 - Buffer the latest elements/appState/files in refs. On idle, persist only the
   intentional app-state fields and update the exact `tabId` if its
   `sceneVersion` is still current.
-- Global menu canvas commands must point at the active pane only. Do not keep a
-  stale API after activation changes.
+- Register menu canvas APIs by `tabId` with identity-safe cleanup. Commands must
+  resolve the active registration when they execute, including delayed
+  fullscreen callbacks.
 
 ## UI And Styling
 

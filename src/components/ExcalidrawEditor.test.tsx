@@ -1,27 +1,59 @@
-import { act, render } from '@testing-library/react'
+import { act, render, waitFor } from '@testing-library/react'
+import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { OpenTab } from '../types'
 import type { CachedExcalidrawScene } from '../types'
 import { useStore } from '../store/useStore'
 import { ExcalidrawEditor } from './ExcalidrawEditor'
 import { flushPendingEditorScene } from '../lib/editorSceneSync'
+import { executeMenuCommand } from '../hooks/useMenuHandler'
 
 const excalidrawHarness = vi.hoisted(() => ({
+  activeEffects: 0,
+  effectMounts: 0,
+  effectCleanups: 0,
   renderCount: 0,
-  props: null as null | {
+  propsByElementId: new Map<string, {
     excalidrawAPI: (api: unknown) => void
     onChange: (
       elements: readonly unknown[],
       appState: Record<string, unknown>,
       files: Record<string, unknown>
     ) => void
+    viewModeEnabled: boolean
+    detectScroll: boolean
+  }>(),
+  props: null as null | {
+    initialData: { elements: readonly unknown[] }
+    excalidrawAPI: (api: unknown) => void
+    onChange: (
+      elements: readonly unknown[],
+      appState: Record<string, unknown>,
+      files: Record<string, unknown>
+    ) => void
+    viewModeEnabled: boolean
+    detectScroll: boolean
   },
 }))
 
 vi.mock('@excalidraw/excalidraw', () => ({
   Excalidraw: (props: typeof excalidrawHarness.props) => {
+    useEffect(() => {
+      excalidrawHarness.activeEffects += 1
+      excalidrawHarness.effectMounts += 1
+      return () => {
+        excalidrawHarness.activeEffects -= 1
+        excalidrawHarness.effectCleanups += 1
+      }
+    }, [])
     excalidrawHarness.renderCount += 1
     excalidrawHarness.props = props
+    const firstElement = props?.initialData.elements[0] as
+      | { id?: string }
+      | undefined
+    if (firstElement?.id && props) {
+      excalidrawHarness.propsByElementId.set(firstElement.id, props)
+    }
     return <div data-testid="excalidraw" />
   },
 }))
@@ -56,6 +88,93 @@ afterEach(() => {
 })
 
 describe('ExcalidrawEditor canvas updates', () => {
+  it('keeps inactive editors mounted and isolates menu APIs', async () => {
+    excalidrawHarness.propsByElementId.clear()
+    excalidrawHarness.activeEffects = 0
+    excalidrawHarness.effectMounts = 0
+    excalidrawHarness.effectCleanups = 0
+    const firstTab = createTab([{ id: 'editor-first' }])
+    const secondTab: OpenTab = {
+      ...createTab([{ id: 'editor-second' }]),
+      tabId: 'editor-performance-tab-2',
+      name: 'Performance 2.excalidraw',
+      path: '/drawings/Performance 2.excalidraw',
+      contentHash: 'performance-hash-2',
+      fileIdentity: 'performance-identity-2',
+    }
+    useStore.setState({
+      activeFile: firstTab,
+      fileContent: firstTab.cachedContent,
+      activeFileLoadSource: 'cache',
+      isDirty: false,
+      openTabs: [firstTab, secondTab],
+      presentationMode: false,
+    })
+    const view = render(<ExcalidrawEditor theme="light" />)
+
+    expect(await view.findAllByTestId('excalidraw')).toHaveLength(2)
+    await waitFor(() => {
+      expect(excalidrawHarness.activeEffects).toBe(2)
+    })
+    expect(
+      excalidrawHarness.propsByElementId.get('editor-first')?.viewModeEnabled
+    ).toBe(false)
+    expect(
+      excalidrawHarness.propsByElementId.get('editor-first')?.detectScroll
+    ).toBe(false)
+    expect(
+      excalidrawHarness.propsByElementId.get('editor-second')?.viewModeEnabled
+    ).toBe(true)
+    expect(
+      excalidrawHarness.propsByElementId.get('editor-second')?.detectScroll
+    ).toBe(false)
+    const firstUpdateScene = vi.fn()
+    const secondUpdateScene = vi.fn()
+    act(() => {
+      excalidrawHarness.propsByElementId.get('editor-first')?.excalidrawAPI({
+        getAppState: () => ({ zoom: { value: 1 } }),
+        updateScene: firstUpdateScene,
+        scrollToContent: vi.fn(),
+        refresh: vi.fn(),
+      })
+      excalidrawHarness.propsByElementId.get('editor-second')?.excalidrawAPI({
+        getAppState: () => ({ zoom: { value: 1 } }),
+        updateScene: secondUpdateScene,
+        scrollToContent: vi.fn(),
+        refresh: vi.fn(),
+      })
+    })
+    await executeMenuCommand({ command: 'zoom_in' })
+    expect(firstUpdateScene).toHaveBeenCalledOnce()
+    firstUpdateScene.mockClear()
+    await waitFor(() => {
+      expect(excalidrawHarness.activeEffects).toBe(2)
+    })
+
+    act(() => {
+      useStore.setState({
+        activeFile: secondTab,
+        fileContent: secondTab.cachedContent,
+      })
+    })
+
+    await waitFor(() => {
+      expect(view.getAllByTestId('excalidraw')).toHaveLength(2)
+      expect(excalidrawHarness.activeEffects).toBe(2)
+      expect(excalidrawHarness.effectMounts).toBe(2)
+      expect(excalidrawHarness.effectCleanups).toBe(0)
+      expect(
+        excalidrawHarness.propsByElementId.get('editor-first')?.viewModeEnabled
+      ).toBe(true)
+      expect(
+        excalidrawHarness.propsByElementId.get('editor-second')?.viewModeEnabled
+      ).toBe(false)
+    })
+    await executeMenuCommand({ command: 'zoom_in' })
+    expect(firstUpdateScene).not.toHaveBeenCalled()
+    expect(secondUpdateScene).toHaveBeenCalledOnce()
+  })
+
   it('ignores viewport-only changes and buffers document serialization', async () => {
     const tab = createTab()
     excalidrawHarness.renderCount = 0

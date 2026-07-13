@@ -14,6 +14,8 @@ recovery behavior before optimizing for convenience.
   reconciliation, recovery/conflict state, and workspace mutations.
 - `src/components/ExcalidrawEditor.tsx` owns the mounted canvas lifecycle and
   scene buffering. `src/lib/editorSceneSync.ts` is the synchronous flush bridge.
+- `src/hooks/useFileSystemChangeListener.ts` owns frontend watcher-event
+  coalescing and ensures refreshes do not overlap.
 - `src/lib/tabLifecycle.ts` owns close-state classification;
   `src/lib/saveStatus.ts` owns derived save labels; `src/lib/path.ts` owns path
   comparison rules. Extend these owners instead of duplicating their logic.
@@ -50,6 +52,12 @@ recovery behavior before optimizing for convenience.
 - Use Excalidraw's first restored scene callback as the clean element baseline.
   Restoration and viewport-only callbacks must not mark a file dirty.
 - Keep inactive editor panes isolated from active global menu/API state.
+- Keep inactive editor panes mounted so Excalidraw history survives tab
+  switches. Hide them with `display: none`, use view mode to detach edit-only
+  listeners, and disable scroll detection for the fixed editor viewport; do not
+  unmount them or use React `Activity`.
+- Resolve menu canvas APIs by active `tabId`; registrations and stale cleanup
+  must never redirect a command to another tab.
 
 ## Working Rules
 
@@ -81,8 +89,8 @@ For Rust changes, also run `cargo fmt --manifest-path src-tauri/Cargo.toml` and
 the packages listed in `README.md`; report an environment blocker rather than
 claiming success when they are absent.
 
-Current frontend baseline: 24 test files, 146 tests, 69.31% statement coverage,
-65.82% branch coverage, 78.00% function coverage, and 69.72% line coverage.
+Current frontend baseline: 25 test files, 154 tests, 71.13% statement coverage,
+67.06% branch coverage, 79.95% function coverage, and 71.74% line coverage.
 Update this file, `README.md`, and
 `.github/instructions/testing.instructions.md` together whenever test counts or
 coverage change. Update these instructions when architecture or invariants

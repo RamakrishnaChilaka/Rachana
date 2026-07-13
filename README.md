@@ -61,15 +61,18 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-Current frontend baseline: 24 test files, 146 tests, 69.31% statement coverage,
-65.82% branch coverage, 78.00% function coverage, and 69.72% line coverage.
+Current frontend baseline: 25 test files, 154 tests, 71.13% statement coverage,
+67.06% branch coverage, 79.95% function coverage, and 71.74% line coverage.
 
 ### Canvas performance
 
 The Excalidraw SDK is loaded only when a drawing is opened. During editing, the
 latest scene is buffered and full-document JSON serialization runs after 100 ms
 of inactivity instead of on pointer-move frames. Save, Save As, tab lifecycle,
-and workspace lifecycle paths flush pending scene data synchronously.
+and workspace lifecycle paths flush pending scene data synchronously. Inactive
+tabs remain mounted to retain undo history, but are not displayed and run in
+view mode with scroll detection disabled. Native file-watcher bursts are
+coalesced into one tree refresh and conflict-reconciliation pass.
 
 Use a production build when comparing responsiveness with excalidraw.com.
 React and Excalidraw development builds intentionally include additional checks,

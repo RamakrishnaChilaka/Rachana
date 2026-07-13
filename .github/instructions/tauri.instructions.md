@@ -17,7 +17,8 @@ description: "Use when changing Tauri commands, Rust filesystem behavior, securi
 - File/folder deletion must compute scope against every open tab and retain
   frontend recovery semantics. Do not reduce it to an unconditional remove.
 - Watcher events can race with app-originated saves. Preserve watcher retention,
-  event filtering, and serialized frontend reconciliation.
+  event filtering, frontend burst coalescing, stale tree-result rejection, and
+  serialized reconciliation.
 - Never weaken the CSP, capability allowlist, path traversal checks, symlink
   handling, or file-type validation merely to make a command convenient.
 

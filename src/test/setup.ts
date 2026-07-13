@@ -60,4 +60,4 @@ beforeEach(() => {
 })
 
 // Export mocks used directly by tests.
-export { mockAppWindow, mockInvoke, saveResult }
+export { mockAppWindow, mockInvoke, mockListen, saveResult }

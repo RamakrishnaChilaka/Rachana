@@ -22,10 +22,23 @@ export interface MenuCommand {
   }
 }
 
-let globalExcalidrawAPI: ExcalidrawImperativeAPI | null = null
+const editorAPIs = new Map<string, ExcalidrawImperativeAPI>()
 
-export function setGlobalExcalidrawAPI(api: ExcalidrawImperativeAPI | null) {
-  globalExcalidrawAPI = api
+export function registerEditorExcalidrawAPI(
+  tabId: string,
+  api: ExcalidrawImperativeAPI
+) {
+  editorAPIs.set(tabId, api)
+  return () => {
+    if (editorAPIs.get(tabId) === api) {
+      editorAPIs.delete(tabId)
+    }
+  }
+}
+
+function getActiveExcalidrawAPI() {
+  const activeTabId = useStore.getState().activeFile?.tabId
+  return activeTabId ? editorAPIs.get(activeTabId) ?? null : null
 }
 
 export async function saveActiveTabAs(): Promise<void> {
@@ -56,10 +69,11 @@ function normalizeZoom(value: number): NormalizedZoomValue {
 }
 
 function zoomCanvas(factor: number) {
-  if (!globalExcalidrawAPI) return
+  const excalidrawAPI = getActiveExcalidrawAPI()
+  if (!excalidrawAPI) return
 
-  const appState = globalExcalidrawAPI.getAppState()
-  globalExcalidrawAPI.updateScene({
+  const appState = excalidrawAPI.getAppState()
+  excalidrawAPI.updateScene({
     appState: {
       ...appState,
       zoom: {
@@ -70,17 +84,18 @@ function zoomCanvas(factor: number) {
 }
 
 function resetCanvasZoom() {
-  if (!globalExcalidrawAPI) return
+  const excalidrawAPI = getActiveExcalidrawAPI()
+  if (!excalidrawAPI) return
 
-  const elements = globalExcalidrawAPI.getSceneElements()
+  const elements = excalidrawAPI.getSceneElements()
   if (elements && elements.length > 0) {
-    globalExcalidrawAPI.scrollToContent(elements, {
+    excalidrawAPI.scrollToContent(elements, {
       fitToContent: true,
     })
     return
   }
 
-  globalExcalidrawAPI.updateScene({
+  excalidrawAPI.updateScene({
     appState: {
       zoom: { value: normalizeZoom(1) },
       scrollX: 0,
@@ -93,15 +108,15 @@ async function toggleFullscreen() {
   const appWindow = getCurrentWindow()
   await appWindow.setFullscreen(!(await appWindow.isFullscreen()))
 
-  const excalidrawAPI = globalExcalidrawAPI
-  if (!excalidrawAPI) return
-
   globalThis.setTimeout(() => {
+    const excalidrawAPI = getActiveExcalidrawAPI()
+    if (!excalidrawAPI) return
     try {
       excalidrawAPI.refresh()
       const elements = excalidrawAPI.getSceneElements()
       if (elements && elements.length > 0) {
         globalThis.setTimeout(() => {
+          if (getActiveExcalidrawAPI() !== excalidrawAPI) return
           excalidrawAPI.scrollToContent(elements, {
             fitToContent: true,
           })

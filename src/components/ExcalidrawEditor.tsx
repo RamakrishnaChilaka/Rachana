@@ -9,7 +9,7 @@ import {
   useState,
 } from 'react'
 import { useStore } from '../store/useStore'
-import { setGlobalExcalidrawAPI } from '../hooks/useMenuHandler'
+import { registerEditorExcalidrawAPI } from '../hooks/useMenuHandler'
 import { TIMING } from '../constants'
 import type { OpenTab } from '../types'
 import { FilePlus2, FolderOpen, LockKeyhole } from 'lucide-react'
@@ -62,6 +62,8 @@ const EditorPane = memo(function EditorPane({
 }: EditorPaneProps) {
   const [isReady, setIsReady] = useState(false)
   const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const menuAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const unregisterMenuAPIRef = useRef<(() => void) | null>(null)
   const initialLoadCompleteRef = useRef(false)
   const hasObservedInitialSceneRef = useRef(false)
   const isUserChangeRef = useRef(false)
@@ -90,6 +92,19 @@ const EditorPane = memo(function EditorPane({
       centerTimerRef.current = null
     }
   }, [])
+
+  const disconnectMenuAPI = useCallback(() => {
+    unregisterMenuAPIRef.current?.()
+    unregisterMenuAPIRef.current = null
+    menuAPIRef.current = null
+  }, [])
+
+  const connectMenuAPI = useCallback((api: ExcalidrawImperativeAPI) => {
+    if (menuAPIRef.current === api) return
+    disconnectMenuAPI()
+    menuAPIRef.current = api
+    unregisterMenuAPIRef.current = registerEditorExcalidrawAPI(tab.tabId, api)
+  }, [disconnectMenuAPI, tab.tabId])
 
   const flushPendingScene = useCallback(() => {
     if (contentSyncTimerRef.current) {
@@ -192,10 +207,12 @@ const EditorPane = memo(function EditorPane({
   }, [centerInitialContent])
 
   useEffect(() => {
-    if (isActive && excalidrawAPIRef.current) {
-      setGlobalExcalidrawAPI(excalidrawAPIRef.current)
+    if (!isActive) return
+    if (excalidrawAPIRef.current) {
+      connectMenuAPI(excalidrawAPIRef.current)
     }
-  }, [isActive])
+    return disconnectMenuAPI
+  }, [connectMenuAPI, disconnectMenuAPI, isActive])
 
   useEffect(() => {
     if (!isActive) {
@@ -255,7 +272,7 @@ const EditorPane = memo(function EditorPane({
 
   return (
     <div
-      className={`absolute inset-0 h-full ${isActive ? 'visible z-10' : 'invisible z-0 pointer-events-none'}`}
+      className={`absolute inset-0 h-full ${isActive ? 'visible z-10' : 'hidden'}`}
       aria-hidden={!isActive}
       role="tabpanel"
       aria-label={tab.name}
@@ -266,13 +283,14 @@ const EditorPane = memo(function EditorPane({
           excalidrawAPI={(api) => {
             excalidrawAPIRef.current = api
             if (isActive) {
-              setGlobalExcalidrawAPI(api)
+              connectMenuAPI(api)
               centerInitialContent(api)
             }
           }}
           onChange={handleChange}
           theme={theme}
-          viewModeEnabled={presentationMode}
+          viewModeEnabled={presentationMode || !isActive}
+          detectScroll={false}
           UIOptions={EXCALIDRAW_UI_OPTIONS}
         />
       </Suspense>
@@ -357,19 +375,21 @@ export function ExcalidrawEditor({ theme }: ExcalidrawEditorProps) {
 
   return (
     <main className="editor-region">
-      {openTabs.map((tab) => (
-        <EditorPane
-          key={`${tab.tabId}:${tab.sceneVersion}`}
-          tab={tab}
-          isActive={
-            activeFile.tabId
-              ? activeFile.tabId === tab.tabId
-              : activeFile.path === tab.path
-          }
-          presentationMode={presentationMode}
-          theme={theme}
-        />
-      ))}
+      {openTabs.map((tab) => {
+        const isActive = activeFile.tabId
+          ? activeFile.tabId === tab.tabId
+          : activeFile.path === tab.path
+
+        return (
+          <EditorPane
+            key={`${tab.tabId}:${tab.sceneVersion}`}
+            tab={tab}
+            isActive={isActive}
+            presentationMode={presentationMode}
+            theme={theme}
+          />
+        )
+      })}
     </main>
   )
 }

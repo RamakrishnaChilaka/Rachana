@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useMenuHandler } from './hooks/useMenuHandler'
 import { useResolvedTheme } from './hooks/useResolvedTheme'
 import { useAutoSave } from './hooks/useAutoSave'
+import { useFileSystemChangeListener } from './hooks/useFileSystemChangeListener'
 import { handleAppCloseRequest } from './lib/tabLifecycle'
 
 function App() {
@@ -25,20 +26,7 @@ function App() {
     loadPreferences()
   }, [loadPreferences])
 
-  // Listen for file system changes
-  useEffect(() => {
-    if (!currentDirectory) return
-
-    const unlisten = listen('file-system-change', async () => {
-      const state = useStore.getState()
-      await state.loadFileTree(currentDirectory)
-      await useStore.getState().reconcileActiveFileAfterExternalChange()
-    })
-
-    return () => {
-      unlisten.then((fn) => fn())
-    }
-  }, [currentDirectory])
+  useFileSystemChangeListener(currentDirectory)
 
   // Listen for window close event
   useEffect(() => {
@@ -96,7 +84,7 @@ function App() {
   // Setup keyboard shortcuts
   useKeyboardShortcuts()
   useAutoSave()
-  
+
   // Setup menu handler (NOTE: ExcalidrawEditor will set the Excalidraw API)
   useMenuHandler()
 
