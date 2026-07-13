@@ -49,6 +49,9 @@ jobs:
       - name: Run tests
         run: npm run test:run
 
+      - name: Run native tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Import Developer ID signing certificate
         if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
         env:
@@ -183,6 +186,9 @@ jobs:
       - name: Run tests
         run: npm run test:run
 
+      - name: Run native tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Build Linux AppImage
         run: npm run tauri -- build --bundles appimage
 
@@ -205,12 +211,114 @@ jobs:
           path: ${{ env.RELEASE_APPIMAGE }}
           if-no-files-found: error
 
+  build-windows:
+    name: Build Windows ${{ matrix.arch }} Installers
+    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: x86_64
+            node_arch: x64
+            rust_host: x86_64-pc-windows-msvc
+          - runner: windows-11-arm
+            arch: arm64
+            node_arch: arm64
+            rust_host: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
+      RELEASE_DIR: dist\github-release
+      WINDOWS_ARCH: ${{ matrix.arch }}
+      EXPECTED_NODE_ARCH: ${{ matrix.node_arch }}
+      EXPECTED_RUST_HOST: ${{ matrix.rust_host }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          architecture: ${{ matrix.node_arch }}
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify native toolchain architecture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $nodeArch = node -p "process.arch"
+          $rustHost = (rustc -vV | Select-String '^host: ').Line.Substring(6)
+          if ($nodeArch -ne $env:EXPECTED_NODE_ARCH) {
+            throw "Expected Node $env:EXPECTED_NODE_ARCH, found $nodeArch."
+          }
+          if ($rustHost -ne $env:EXPECTED_RUST_HOST) {
+            throw "Expected Rust host $env:EXPECTED_RUST_HOST, found $rustHost."
+          }
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Run native tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Build Windows NSIS and MSI installers
+        run: npm run tauri -- build --bundles nsis,msi
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          New-Item -ItemType Directory -Force -Path $env:RELEASE_DIR | Out-Null
+
+          $nsisFiles = @(Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*.exe" -File)
+          $msiFiles = @(Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\msi\*.msi" -File)
+          if ($nsisFiles.Count -ne 1 -or $msiFiles.Count -ne 1) {
+            throw "Expected exactly one NSIS and one MSI installer; found $($nsisFiles.Count) and $($msiFiles.Count)."
+          }
+          $nsis = $nsisFiles[0]
+          $msi = $msiFiles[0]
+
+          $nsisRelease = Join-Path $env:RELEASE_DIR "Rachana-$env:GITHUB_REF_NAME-windows-$env:WINDOWS_ARCH-setup.exe"
+          $msiRelease = Join-Path $env:RELEASE_DIR "Rachana-$env:GITHUB_REF_NAME-windows-$env:WINDOWS_ARCH.msi"
+          Copy-Item $nsis.FullName $nsisRelease
+          Copy-Item $msi.FullName $msiRelease
+
+          foreach ($asset in @($nsisRelease, $msiRelease)) {
+            $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path -Leaf $asset)" | Set-Content -Encoding ascii "$asset.sha256"
+          }
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rachana-windows-${{ matrix.arch }}-installers
+          path: dist/github-release/*
+          if-no-files-found: error
+
   github-release:
     name: Create GitHub Release
-    if: ${{ always() && vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && needs.build-linux.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
+    if: ${{ always() && vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && needs.build-linux.result == 'success' && needs.build-windows.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
     needs:
       - build-macos
       - build-linux
+      - build-windows
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -229,11 +337,18 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: dist/github-release/*
+          generate_release_notes: true
           body: |
             ## Downloads
 
+            - **Windows x86_64:** NSIS setup `.exe` or Windows Installer `.msi`
+            - **Windows ARM64:** NSIS setup `.exe` or Windows Installer `.msi`
             - **Linux x86_64:** AppImage
             - **macOS Apple Silicon:** DMG
+
+            > Windows installers are currently unsigned and may trigger Microsoft Defender SmartScreen. Verify the adjacent `.sha256` file before installation.
+
+            > The Windows ARM64 application is native ARM64. Its NSIS setup wrapper runs through Windows x86 emulation, as documented by Tauri.
 
             > The macOS DMG is currently unsigned. On first launch, Control-click Rachana in Finder, choose **Open**, then confirm **Open**.
 

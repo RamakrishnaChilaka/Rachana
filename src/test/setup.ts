@@ -50,9 +50,6 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
   message: vi.fn(),
 }))
 
-// Mock @tauri-apps/plugin-opener
-vi.mock('@tauri-apps/plugin-opener', () => ({}))
-
 // Reset mocks before each test
 beforeEach(() => {
   mockInvoke.mockReset()
@@ -62,5 +59,5 @@ beforeEach(() => {
   }
 })
 
-// Export mocks for use in tests
-export { mockAppWindow, mockInvoke, mockListen, saveResult }
+// Export mocks used directly by tests.
+export { mockAppWindow, mockInvoke, saveResult }

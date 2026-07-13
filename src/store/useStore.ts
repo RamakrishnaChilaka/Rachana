@@ -14,6 +14,7 @@ import {
   rekeySaveOperation,
   type SaveOperations,
 } from '../lib/saveStatus'
+import { flushPendingEditorScene } from '../lib/editorSceneSync'
 
 type UnsavedChangesDecision = 'save' | 'discard' | 'cancel'
 type FileLoadSource = 'cache' | 'disk' | null
@@ -592,12 +593,12 @@ interface AppStore {
   saveOperations: SaveOperations
 
   // Actions
-  setCurrentDirectory: (dir: string | null) => void
-  setFiles: (files: ExcalidrawFile[]) => void
-  setFileTree: (tree: FileTreeNode[]) => void
-  setActiveFile: (file: ExcalidrawFile | null) => void
-  setFileContent: (content: string | null) => void
-  updateTabScene: (filePath: string, scene: CachedExcalidrawScene) => void
+  updateTabContent: (
+    tabId: string,
+    sceneVersion: number,
+    content: string,
+    scene: CachedExcalidrawScene
+  ) => void
   applySaveAsResult: (
     oldPath: string,
     newPath: string,
@@ -610,7 +611,6 @@ interface AppStore {
   beginSaveOperation: (filePath: string) => string
   endSaveOperation: (operationId: string) => void
   setPreferences: (prefs: Preferences) => void
-  setSidebarVisible: (visible: boolean) => void
   setSidebarWidth: (width: number) => void
   setIsDirty: (dirty: boolean) => void
   markFileAsModified: (
@@ -621,7 +621,6 @@ interface AppStore {
   markTreeNodeAsModified: (filePath: string, modified: boolean) => void
   togglePresentationMode: () => void
   closeTab: (filePath: string, tabId?: string) => Promise<void>
-  toggleDecorations: () => void
 
   // Async actions
   loadDirectory: (dir: string) => Promise<boolean>
@@ -729,37 +728,23 @@ export const useStore = create<AppStore>((set, get) => ({
   openTabs: [],
   saveOperations: {},
 
-  // Basic setters
-  setCurrentDirectory: (dir) => set({ currentDirectory: dir }),
-  setFiles: (files) => set({ files }),
-  setFileTree: (tree) => set({ fileTree: tree }),
-  setActiveFile: (file) => set({ activeFile: file }),
-  setFileContent: (content) => set((state) => ({
-    fileContent: content,
-    openTabs:
-      content && state.activeFile
-        ? state.openTabs.map((tab) =>
-            (
-              state.activeFile?.tabId
-                ? tab.tabId === state.activeFile.tabId
-                : tab.path === state.activeFile?.path
-            )
-              ? { ...tab, cachedContent: content }
-              : tab
-          )
-        : state.openTabs,
-  })),
-  updateTabScene: (filePath, scene) => set((state) => ({
-    openTabs: state.openTabs.map((tab) =>
-      state.activeFile?.path === filePath && state.activeFile.tabId
-        ? tab.tabId === state.activeFile.tabId
-          ? { ...tab, cachedScene: scene }
-          : tab
-        : tab.path === filePath
-          ? { ...tab, cachedScene: scene }
-          : tab
-    ),
-  })),
+  // Targeted synchronous actions
+  updateTabContent: (tabId, sceneVersion, content, scene) => set((state) => {
+    const tab = state.openTabs.find((candidate) => candidate.tabId === tabId)
+    if (!tab || tab.sceneVersion !== sceneVersion) {
+      return state
+    }
+
+    const isActive = state.activeFile?.tabId === tabId
+    return {
+      fileContent: isActive ? content : state.fileContent,
+      openTabs: state.openTabs.map((candidate) =>
+        candidate.tabId === tabId
+          ? { ...candidate, cachedContent: content, cachedScene: scene }
+          : candidate
+      ),
+    }
+  }),
   applySaveAsResult: (
     oldPath,
     newPath,
@@ -842,7 +827,6 @@ export const useStore = create<AppStore>((set, get) => ({
     })
   },
   setPreferences: (prefs) => set({ preferences: prefs }),
-  setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
   setSidebarWidth: (width) => {
     const sidebarWidth = clampSidebarWidth(width)
     set((state) => ({
@@ -851,7 +835,7 @@ export const useStore = create<AppStore>((set, get) => ({
     void get().savePreferences()
   },
   setIsDirty: (dirty) => set({ isDirty: dirty }),
-  
+
   markFileAsModified: (filePath, modified, tabId) => {
     set((state) => {
       const openTabs = state.openTabs.map((f) =>
@@ -886,7 +870,7 @@ export const useStore = create<AppStore>((set, get) => ({
         return node
       })
     }
-    
+
     set((state) => ({
       fileTree: updateNode(state.fileTree)
     }))
@@ -910,7 +894,7 @@ export const useStore = create<AppStore>((set, get) => ({
           console.error('Failed to restore menu before loading directory:', error)
         })
       }
-      
+
       set({
         currentDirectory: dir,
         files,
@@ -922,7 +906,7 @@ export const useStore = create<AppStore>((set, get) => ({
         presentationMode: false,
         openTabs: [],
       })
-      
+
       // Update preferences with recent directory
       const prefs = get().preferences
       // Ensure recentDirectories is always an array
@@ -932,16 +916,16 @@ export const useStore = create<AppStore>((set, get) => ({
       if (recentDirs.length > 10) {
         recentDirs.pop()
       }
-      
+
       const newPrefs: Preferences = {
         ...prefs,
         lastDirectory: dir,
         recentDirectories: recentDirs,
       }
-      
+
       set({ preferences: newPrefs })
       await get().savePreferences()
-      
+
       // Start watching directory
       await invoke('watch_directory', { directory: dir })
       return true
@@ -959,7 +943,7 @@ export const useStore = create<AppStore>((set, get) => ({
       const fileTree = await invoke<FileTreeNode[]>('get_file_tree', {
         directory: dir,
       })
-      
+
       set({ fileTree })
     } catch (error) {
       console.error('Failed to load file tree:', error)
@@ -1292,7 +1276,7 @@ export const useStore = create<AppStore>((set, get) => ({
   // Load file content
   loadFile: async (file) => {
     const state = get()
-    
+
     // If clicking the same file that's already active, do nothing
     if (
       file.tabId
@@ -1301,11 +1285,11 @@ export const useStore = create<AppStore>((set, get) => ({
     ) {
       return
     }
-    
+
     // Check if current file has unsaved changes
     if (state.isDirty && state.activeFile) {
       const decision = await confirmUnsavedChanges(state.activeFile.name, 'switching files')
-      
+
       if (decision === 'save') {
         const saved = await state.saveCurrentFile()
         if (!saved) {
@@ -1355,7 +1339,7 @@ export const useStore = create<AppStore>((set, get) => ({
         }
       }
     }
-    
+
     try {
       const latestState = get()
       const existingTab = latestState.openTabs.find((tab) =>
@@ -1504,11 +1488,11 @@ export const useStore = create<AppStore>((set, get) => ({
       }
     } catch (error) {
       console.error('Failed to load file:', error)
-      
+
       // If file doesn't exist, refresh the tree and show error
       if (String(error).includes('No such file') || String(error).includes('not found')) {
         alert(`File not found: ${file.name}\n\nThe file may have been deleted or moved. Refreshing file list...`)
-        
+
         // Clear active file if it's the one that failed
         if (
           file.tabId
@@ -1522,7 +1506,7 @@ export const useStore = create<AppStore>((set, get) => ({
             isDirty: false,
           })
         }
-        
+
         // Refresh the file tree
         if (state.currentDirectory) {
           await state.loadFileTree(state.currentDirectory)
@@ -1547,9 +1531,10 @@ export const useStore = create<AppStore>((set, get) => ({
 
   // Save current file
   saveCurrentFile: async (content) => {
+    flushPendingEditorScene(get().activeFile?.tabId)
     const state = get()
     const { activeFile, fileContent, isDirty } = state
-    
+
     if (!activeFile) {
       return true
     }
@@ -1570,17 +1555,17 @@ export const useStore = create<AppStore>((set, get) => ({
     if (!activeTab) {
       return false
     }
-    
+
     // Only save if file is dirty
     if (!isDirty && !content) {
       return true
     }
-    
+
     const contentToSave = content || fileContent
     if (!contentToSave) {
       return false
     }
-    
+
     // Validate JSON before saving
     try {
       const parsed = JSON.parse(contentToSave)
@@ -1588,12 +1573,12 @@ export const useStore = create<AppStore>((set, get) => ({
         console.error('[saveCurrentFile] Invalid JSON structure')
         return false
       }
-      
+
     } catch (jsonError) {
       console.error('[saveCurrentFile] Invalid JSON, not saving:', jsonError)
       return false
     }
-    
+
     const saveOperationId = state.beginSaveOperation(activeFile.path)
     try {
       return await serializeFileOperation(activeFile.path, async () => {
@@ -1691,6 +1676,10 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   saveTabAs: async (filePath, forbiddenDirectory, tabId) => {
+    const requestedTab = get().openTabs.find((tab) =>
+      tabId ? tab.tabId === tabId : tab.path === filePath
+    )
+    flushPendingEditorScene(requestedTab?.tabId)
     const snapshot = get()
     const sourceTab = snapshot.openTabs.find((tab) =>
       tabId ? tab.tabId === tabId : tab.path === filePath
@@ -1828,6 +1817,10 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   saveTabForWorkspaceResolution: async (filePath, forbiddenDirectory, tabId) => {
+    const requestedTab = get().openTabs.find((tab) =>
+      tabId ? tab.tabId === tabId : tab.path === filePath
+    )
+    flushPendingEditorScene(requestedTab?.tabId)
     const snapshot = get()
     const tab = snapshot.openTabs.find((openTab) =>
       tabId ? openTab.tabId === tabId : openTab.path === filePath
@@ -1982,11 +1975,11 @@ export const useStore = create<AppStore>((set, get) => ({
   createNewFile: async (fileName, directory) => {
     const state = get()
     let { currentDirectory } = state
-    
+
     // Check if current file has unsaved changes
     if (state.isDirty && state.activeFile) {
       const decision = await confirmUnsavedChanges(state.activeFile.name, 'creating a new file')
-      
+
       if (decision === 'save') {
         await state.saveCurrentFile()
       } else if (decision === 'cancel') {
@@ -2033,7 +2026,7 @@ export const useStore = create<AppStore>((set, get) => ({
         }
       }
     }
-    
+
     // Check if a directory is selected
     if (!currentDirectory) {
       // Prompt to select a directory if none is selected
@@ -2051,31 +2044,31 @@ export const useStore = create<AppStore>((set, get) => ({
         return
       }
     }
-    
+
     // Generate default filename if not provided
     const finalFileName = fileName || `Untitled-${Date.now()}.excalidraw`
     const requestedFileName = finalFileName.endsWith('.excalidraw')
       ? finalFileName
       : `${finalFileName}.excalidraw`
     const targetDirectory = directory || currentDirectory
-    
+
     try {
       // Create the new file
       const filePath = await invoke<string>('create_new_file', {
         directory: targetDirectory,
         fileName: requestedFileName,
       })
-      
+
       // Reload the file tree to show the new file
       await state.loadFileTree(currentDirectory)
-      
+
       // Create an ExcalidrawFile object for the new file
       const file: ExcalidrawFile = {
         name: pathBasename(filePath),
         path: filePath,
         modified: false,
       }
-      
+
       // Load the new file immediately
       await state.loadFile(file)
     } catch (error) {
@@ -2129,15 +2122,15 @@ export const useStore = create<AppStore>((set, get) => ({
   renameFile: async (oldPath, newName) => {
     try {
       // Ensure the new name has .excalidraw extension
-      const finalName = newName.endsWith('.excalidraw') 
-        ? newName 
+      const finalName = newName.endsWith('.excalidraw')
+        ? newName
         : `${newName}.excalidraw`
-      
+
       const newPath = await invoke<string>('rename_file', {
         oldPath,
         newName: finalName,
       })
-      
+
       const state = get()
       const renamedFile = state.activeFile?.path === oldPath
         ? {
@@ -2216,7 +2209,7 @@ export const useStore = create<AppStore>((set, get) => ({
       alert(`Failed to rename folder: ${error}`)
     }
   },
-  
+
   // Delete file
   // NOTE: Confirmation should be handled by the caller
   deleteFile: async (filePath) => {
@@ -2344,7 +2337,7 @@ export const useStore = create<AppStore>((set, get) => ({
           isDirty: fallback.fallbackTab.modified,
         }
       })
-      
+
       const currentDirectory = get().currentDirectory
       if (currentDirectory) {
         await get().loadFileTree(currentDirectory)
@@ -2361,7 +2354,7 @@ export const useStore = create<AppStore>((set, get) => ({
           'The drawing was deleted, but the next tab could not be validated against disk and was left inactive.'
         )
       }
-      
+
       return true
     } catch (error) {
       if (
@@ -2540,10 +2533,10 @@ export const useStore = create<AppStore>((set, get) => ({
     try {
       // The Rust backend returns snake_case fields
       const prefs = await invoke<any>('get_preferences')
-      
+
       // Convert snake_case from Rust to camelCase for TypeScript
       const safePrefs = convertPreferencesFromRust(prefs)
-      
+
       set({
         preferences: safePrefs,
         sidebarVisible: safePrefs.sidebarVisible,
@@ -2626,22 +2619,6 @@ export const useStore = create<AppStore>((set, get) => ({
         })
       }
     }
-  },
-
-  // Toggle decorations
-  toggleDecorations: () => {
-    const state = get()
-    const newVisible = !state.preferences.showDecorations
-    invoke('set_decorations', { visible: newVisible })
-      .then(() => {
-        const newPrefs = { ...state.preferences, showDecorations: newVisible }
-        set({ preferences: newPrefs })
-        get().savePreferences()
-      })
-      .catch((error) => {
-        console.error('Failed to toggle window decorations:', error)
-        alert(`Failed to toggle window decorations: ${error}`)
-      })
   },
 
   // Close tab

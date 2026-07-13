@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react'
+import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertCircle, RefreshCw } from 'lucide-react'
 
 interface Props {
@@ -51,12 +51,12 @@ export class ErrorBoundary extends Component<Props, State> {
                 Something went wrong
               </h1>
             </div>
-            
+
             <div className="mb-6">
               <p className="sidebar-muted mb-2">
                 An unexpected error occurred. The error has been logged and we'll look into it.
               </p>
-              
+
               {this.state.error && (
                 <details className="mt-4">
                   <summary className="sidebar-muted cursor-pointer text-sm">
@@ -82,7 +82,7 @@ export class ErrorBoundary extends Component<Props, State> {
               >
                 Try Again
               </button>
-              
+
               <button
                 onClick={this.handleReload}
                 className="error-primary-button flex-1 px-4 py-2 rounded transition-colors flex items-center justify-center"
@@ -98,20 +98,4 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return this.props.children
   }
-}
-
-// HOC for functional components
-export function withErrorBoundary<P extends object>(
-  Component: React.ComponentType<P>,
-  fallback?: ReactNode
-) {
-  const WrappedComponent = (props: P) => (
-    <ErrorBoundary fallback={fallback}>
-      <Component {...props} />
-    </ErrorBoundary>
-  )
-  
-  WrappedComponent.displayName = `withErrorBoundary(${Component.displayName || Component.name})`
-  
-  return WrappedComponent
 }

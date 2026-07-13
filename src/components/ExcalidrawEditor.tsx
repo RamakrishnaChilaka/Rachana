@@ -1,5 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Excalidraw } from '@excalidraw/excalidraw'
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { useStore } from '../store/useStore'
 import { setGlobalExcalidrawAPI } from '../hooks/useMenuHandler'
 import { TIMING } from '../constants'
@@ -7,9 +15,26 @@ import type { OpenTab } from '../types'
 import { FilePlus2, FolderOpen, LockKeyhole } from 'lucide-react'
 import { createDrawing, selectWorkspace } from '../lib/workspaceActions'
 import { didSceneElementsChange } from '../lib/sceneElements'
+import {
+  registerEditorSceneFlusher,
+} from '../lib/editorSceneSync'
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
+import type {
+  AppState as ExcalidrawAppState,
+  BinaryFiles,
+  ExcalidrawImperativeAPI,
+} from '@excalidraw/excalidraw/types'
 
-type ExcalidrawElement = any
-type ExcalidrawAppState = any
+const Excalidraw = lazy(async () => {
+  const module = await import('@excalidraw/excalidraw')
+  return { default: module.Excalidraw }
+})
+
+interface PendingScene {
+  elements: readonly ExcalidrawElement[]
+  appState: ExcalidrawAppState
+  files: BinaryFiles
+}
 
 interface EditorPaneProps {
   tab: OpenTab
@@ -36,14 +61,17 @@ const EditorPane = memo(function EditorPane({
   theme,
 }: EditorPaneProps) {
   const [isReady, setIsReady] = useState(false)
-  const excalidrawAPIRef = useRef<any>(null)
+  const excalidrawAPIRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const initialLoadCompleteRef = useRef(false)
+  const hasObservedInitialSceneRef = useRef(false)
   const isUserChangeRef = useRef(false)
   const lastElementsRef = useRef(tab.cachedScene.elements || [])
   const hasCenteredInitialContentRef = useRef(false)
   const centerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const centerChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const contentSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingSceneRef = useRef<PendingScene | null>(null)
 
+  // The sceneVersion key remounts this pane; initialData stays stable until then.
   const initialData = useMemo(() => ({
     elements: tab.cachedScene.elements,
     appState: tab.cachedScene.appState,
@@ -61,11 +89,66 @@ const EditorPane = memo(function EditorPane({
       clearTimeout(centerTimerRef.current)
       centerTimerRef.current = null
     }
-    if (centerChangeTimerRef.current) {
-      clearTimeout(centerChangeTimerRef.current)
-      centerChangeTimerRef.current = null
-    }
   }, [])
+
+  const flushPendingScene = useCallback(() => {
+    if (contentSyncTimerRef.current) {
+      clearTimeout(contentSyncTimerRef.current)
+      contentSyncTimerRef.current = null
+    }
+
+    const pendingScene = pendingSceneRef.current
+    if (!pendingScene) {
+      return
+    }
+    pendingSceneRef.current = null
+
+    const persistedAppState = {
+      gridSize: pendingScene.appState.gridSize,
+      viewBackgroundColor: pendingScene.appState.viewBackgroundColor,
+      currentItemFontFamily: pendingScene.appState.currentItemFontFamily,
+      currentItemFontSize: pendingScene.appState.currentItemFontSize,
+      currentItemStrokeColor: pendingScene.appState.currentItemStrokeColor,
+      currentItemBackgroundColor: pendingScene.appState.currentItemBackgroundColor,
+      currentItemFillStyle: pendingScene.appState.currentItemFillStyle,
+      currentItemStrokeWidth: pendingScene.appState.currentItemStrokeWidth,
+      currentItemRoughness: pendingScene.appState.currentItemRoughness,
+      currentItemOpacity: pendingScene.appState.currentItemOpacity,
+      currentItemTextAlign: pendingScene.appState.currentItemTextAlign,
+    }
+    const scene = {
+      elements: pendingScene.elements,
+      appState: persistedAppState,
+      files: pendingScene.files,
+    }
+    const content = JSON.stringify(
+      {
+        type: 'excalidraw',
+        version: 2,
+        source: 'Rachana',
+        ...scene,
+      },
+      null,
+      2
+    )
+
+    useStore.getState().updateTabContent(
+      tab.tabId,
+      tab.sceneVersion,
+      content,
+      scene
+    )
+  }, [tab.sceneVersion, tab.tabId])
+
+  const scheduleContentSync = useCallback(() => {
+    if (contentSyncTimerRef.current) {
+      clearTimeout(contentSyncTimerRef.current)
+    }
+    contentSyncTimerRef.current = setTimeout(
+      flushPendingScene,
+      TIMING.SCENE_SYNC_DELAY
+    )
+  }, [flushPendingScene])
 
   const centerInitialContent = useCallback((api = excalidrawAPIRef.current) => {
     if (!isActive || !api || hasCenteredInitialContentRef.current) {
@@ -85,16 +168,18 @@ const EditorPane = memo(function EditorPane({
     clearCenterTimers()
 
     centerTimerRef.current = setTimeout(() => {
-      api.scrollToContent(elements, {
-        fitToContent: true,
-      })
-      api.refresh?.()
-
-      centerChangeTimerRef.current = setTimeout(() => {
-        centerChangeTimerRef.current = null
-        enableChangeTracking()
-      }, TIMING.USER_CHANGE_ENABLE_DELAY)
-    }, TIMING.FILE_LOAD_DELAY)
+      centerTimerRef.current = null
+      try {
+        api.scrollToContent(elements, {
+          fitToContent: true,
+        })
+        api.refresh?.()
+      } finally {
+        if (hasObservedInitialSceneRef.current) {
+          enableChangeTracking()
+        }
+      }
+    }, 0)
   }, [
     clearCenterTimers,
     enableChangeTracking,
@@ -113,6 +198,20 @@ const EditorPane = memo(function EditorPane({
   }, [isActive])
 
   useEffect(() => {
+    if (!isActive) {
+      flushPendingScene()
+    }
+  }, [flushPendingScene, isActive])
+
+  useEffect(() => {
+    const unregister = registerEditorSceneFlusher(tab.tabId, flushPendingScene)
+    return () => {
+      flushPendingScene()
+      unregister()
+    }
+  }, [flushPendingScene, tab.tabId])
+
+  useEffect(() => {
     return () => {
       clearCenterTimers()
     }
@@ -121,9 +220,18 @@ const EditorPane = memo(function EditorPane({
   const handleChange = useCallback((
     elements: readonly ExcalidrawElement[],
     appState: ExcalidrawAppState,
-    files: any
+    files: BinaryFiles
   ) => {
-    if (!isActive || !isUserChangeRef.current || !initialLoadCompleteRef.current) {
+    if (!initialLoadCompleteRef.current) {
+      lastElementsRef.current = elements
+      hasObservedInitialSceneRef.current = true
+      if (isActive && hasCenteredInitialContentRef.current) {
+        enableChangeTracking()
+      }
+      return
+    }
+
+    if (!isActive || !isUserChangeRef.current) {
       lastElementsRef.current = elements
       return
     }
@@ -134,43 +242,16 @@ const EditorPane = memo(function EditorPane({
 
     lastElementsRef.current = elements
 
+    pendingSceneRef.current = { elements, appState, files }
+    scheduleContentSync()
+
     const store = useStore.getState()
     if (!store.isDirty) {
       store.setIsDirty(true)
       store.markFileAsModified(tab.path, true, tab.tabId)
       store.markTreeNodeAsModified(tab.path, true)
     }
-
-    const newContent = JSON.stringify(
-      {
-        type: 'excalidraw',
-        version: 2,
-        source: 'Rachana',
-        elements,
-        appState: {
-          gridSize: appState.gridSize,
-          viewBackgroundColor: appState.viewBackgroundColor,
-          currentItemFontFamily: appState.currentItemFontFamily,
-          currentItemFontSize: appState.currentItemFontSize,
-          currentItemStrokeColor: appState.currentItemStrokeColor,
-          currentItemBackgroundColor: appState.currentItemBackgroundColor,
-          currentItemFillStyle: appState.currentItemFillStyle,
-          currentItemStrokeWidth: appState.currentItemStrokeWidth,
-          currentItemRoughness: appState.currentItemRoughness,
-          currentItemOpacity: appState.currentItemOpacity,
-          currentItemTextAlign: appState.currentItemTextAlign,
-        },
-        files,
-      },
-      null,
-      2
-    )
-
-    const freshStore = useStore.getState()
-    if (freshStore.activeFile?.tabId === tab.tabId) {
-      freshStore.setFileContent(newContent)
-    }
-  }, [isActive, tab.path, tab.tabId])
+  }, [enableChangeTracking, isActive, scheduleContentSync, tab.path, tab.tabId])
 
   return (
     <div
@@ -179,20 +260,22 @@ const EditorPane = memo(function EditorPane({
       role="tabpanel"
       aria-label={tab.name}
     >
-      <Excalidraw
-        initialData={initialData}
-        excalidrawAPI={(api) => {
-          excalidrawAPIRef.current = api
-          if (isActive) {
-            setGlobalExcalidrawAPI(api)
-            centerInitialContent(api)
-          }
-        }}
-        onChange={handleChange}
-        theme={theme}
-        viewModeEnabled={presentationMode}
-        UIOptions={EXCALIDRAW_UI_OPTIONS}
-      />
+      <Suspense fallback={null}>
+        <Excalidraw
+          initialData={initialData}
+          excalidrawAPI={(api) => {
+            excalidrawAPIRef.current = api
+            if (isActive) {
+              setGlobalExcalidrawAPI(api)
+              centerInitialContent(api)
+            }
+          }}
+          onChange={handleChange}
+          theme={theme}
+          viewModeEnabled={presentationMode}
+          UIOptions={EXCALIDRAW_UI_OPTIONS}
+        />
+      </Suspense>
       {!isReady && isActive && (
         <div className="editor-loading absolute inset-0 z-20 flex items-center justify-center">
           <div className="flex items-center gap-3">

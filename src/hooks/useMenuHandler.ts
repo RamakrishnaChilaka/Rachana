@@ -10,6 +10,10 @@ import {
   createWorkspaceFolder,
   selectWorkspace,
 } from '../lib/workspaceActions'
+import type {
+  ExcalidrawImperativeAPI,
+  NormalizedZoomValue,
+} from '@excalidraw/excalidraw/types'
 
 export interface MenuCommand {
   command: string
@@ -18,9 +22,9 @@ export interface MenuCommand {
   }
 }
 
-let globalExcalidrawAPI: any = null
+let globalExcalidrawAPI: ExcalidrawImperativeAPI | null = null
 
-export function setGlobalExcalidrawAPI(api: any) {
+export function setGlobalExcalidrawAPI(api: ExcalidrawImperativeAPI | null) {
   globalExcalidrawAPI = api
 }
 
@@ -47,6 +51,10 @@ async function clearRecentDirectories() {
   useStore.getState().setPreferences(preferences)
 }
 
+function normalizeZoom(value: number): NormalizedZoomValue {
+  return Math.min(Math.max(value, 0.1), 30) as NormalizedZoomValue
+}
+
 function zoomCanvas(factor: number) {
   if (!globalExcalidrawAPI) return
 
@@ -55,7 +63,7 @@ function zoomCanvas(factor: number) {
     appState: {
       ...appState,
       zoom: {
-        value: Math.min(Math.max(appState.zoom.value * factor, 0.1), 30),
+        value: normalizeZoom(appState.zoom.value * factor),
       },
     },
   })
@@ -74,7 +82,7 @@ function resetCanvasZoom() {
 
   globalExcalidrawAPI.updateScene({
     appState: {
-      zoom: { value: 1 },
+      zoom: { value: normalizeZoom(1) },
       scrollX: 0,
       scrollY: 0,
     },
@@ -85,15 +93,16 @@ async function toggleFullscreen() {
   const appWindow = getCurrentWindow()
   await appWindow.setFullscreen(!(await appWindow.isFullscreen()))
 
-  if (!globalExcalidrawAPI) return
+  const excalidrawAPI = globalExcalidrawAPI
+  if (!excalidrawAPI) return
 
   globalThis.setTimeout(() => {
     try {
-      globalExcalidrawAPI.refresh()
-      const elements = globalExcalidrawAPI.getSceneElements()
+      excalidrawAPI.refresh()
+      const elements = excalidrawAPI.getSceneElements()
       if (elements && elements.length > 0) {
         globalThis.setTimeout(() => {
-          globalExcalidrawAPI.scrollToContent(elements, {
+          excalidrawAPI.scrollToContent(elements, {
             fitToContent: true,
           })
         }, 100)

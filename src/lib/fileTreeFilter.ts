@@ -1,7 +1,7 @@
 import type { FileTreeNode } from '../types'
 import { drawingDisplayName } from './path'
 
-export interface FileTreeFilterResult {
+interface FileTreeFilterResult {
   nodes: FileTreeNode[]
   matchCount: number
 }

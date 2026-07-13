@@ -6,11 +6,15 @@ import {
   DeletionRecoveryError,
   useStore,
 } from './useStore'
-import type { OpenTab } from '../types'
+import type { CachedExcalidrawScene, OpenTab } from '../types'
 
 let nextTestTabId = 0
 
-function createTab(name: string, modified = false, elements: readonly any[] = []): OpenTab {
+function createTab(
+  name: string,
+  modified = false,
+  elements: readonly Record<string, unknown>[] = []
+): OpenTab {
   const content = JSON.stringify({ elements, appState: {}, files: {} })
   return {
     tabId: `store-tab-${++nextTestTabId}`,
@@ -20,7 +24,11 @@ function createTab(name: string, modified = false, elements: readonly any[] = []
     cachedContent: content,
     contentHash: name,
     fileIdentity: `identity:${name}`,
-    cachedScene: { elements, appState: {}, files: {} },
+    cachedScene: {
+      elements: elements as unknown as CachedExcalidrawScene['elements'],
+      appState: {},
+      files: {},
+    },
     sceneVersion: 0,
   }
 }
@@ -89,7 +97,9 @@ describe('tab fallback after deletion', () => {
     const remainingTab = {
       ...createTab('Remaining.excalidraw', true, latestElements),
       cachedScene: {
-        elements: [{ id: 'stale-element', type: 'ellipse' }],
+        elements: [
+          { id: 'stale-element', type: 'ellipse' },
+        ] as unknown as CachedExcalidrawScene['elements'],
         appState: {},
         files: {},
       },

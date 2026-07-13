@@ -1,3 +1,9 @@
+import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
+import type {
+  AppState as ExcalidrawAppState,
+  BinaryFiles,
+} from '@excalidraw/excalidraw/types'
+
 export interface ExcalidrawFile {
   name: string
   path: string
@@ -6,9 +12,9 @@ export interface ExcalidrawFile {
 }
 
 export interface CachedExcalidrawScene {
-  elements: readonly any[]
-  appState: Record<string, any>
-  files?: Record<string, any>
+  elements: readonly ExcalidrawElement[]
+  appState: Partial<ExcalidrawAppState>
+  files?: BinaryFiles
 }
 
 export interface OpenTab extends ExcalidrawFile {
@@ -29,13 +35,6 @@ export interface FileTreeNode {
   is_directory: boolean
   modified: boolean
   children?: FileTreeNode[]
-}
-
-export interface AppState {
-  currentDirectory: string | null
-  files: ExcalidrawFile[]
-  activeFile: ExcalidrawFile | null
-  recentDirectories: string[]
 }
 
 export interface Preferences {

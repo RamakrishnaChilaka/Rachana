@@ -8,6 +8,7 @@ Every pushed `v*` tag, such as `v0.1.0`, triggers `.github/workflows/release.yml
 
 The workflow builds:
 
+- Windows x86_64 and ARM64 NSIS (`.exe`) and MSI (`.msi`) installers
 - Linux x86_64 AppImage
 - macOS Apple Silicon DMG (`aarch64-apple-darwin`) when `RACHANA_MACOS_RELEASE_ENABLED` is also set to `true`
 
@@ -24,6 +25,14 @@ git push origin v0.1.0
 
 Notes:
 
+- Windows installers are unsigned and include adjacent SHA-256 checksum files.
+  Microsoft Defender SmartScreen may warn until signed releases are configured.
+- Windows builds run natively on `windows-2025` (x86_64) and `windows-11-arm`
+  (ARM64), and fail before compilation if Node or Rust resolves to the wrong
+  architecture.
+- The ARM64 application binary is native. Tauri's ARM64 NSIS setup wrapper is
+  x86 and runs through Windows emulation; the MSI and installed application are
+  labeled by their target architecture.
 - macOS builds require macOS 12 or newer and target Apple Silicon only.
 - The macOS workflow produces an explicitly labeled unsigned DMG by default.
 - Set `RACHANA_MACOS_SIGNED_RELEASE_ENABLED` to `true` only after all Apple signing and notarization secrets are configured. Signed releases use a Developer ID certificate and are notarized before upload.
