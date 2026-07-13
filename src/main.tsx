@@ -6,6 +6,11 @@ import { detectDesktopPlatform } from "./lib/platform";
 import "@excalidraw/excalidraw/index.css";
 import "./index.css";
 
+window.EXCALIDRAW_ASSET_PATH = new URL(
+  "./assets/excalidraw/",
+  document.baseURI,
+).href;
+
 document.documentElement.dataset.platform = detectDesktopPlatform(
   navigator.userAgent,
 );

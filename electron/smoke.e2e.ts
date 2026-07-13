@@ -37,26 +37,50 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
     expect(await page.evaluate(() => Boolean(
       (window as Window & { rachana?: unknown }).rachana
     ))).toBe(true)
-    expect(await page.evaluate(async () => {
-      const response = await fetch(
-        './assets/excalidraw/fonts/Virgil/Virgil-Regular.woff2'
-      )
-      return response.ok && (await response.arrayBuffer()).byteLength > 0
-    })).toBe(true)
-
     await page.locator('.empty-primary-action').click()
     await expect(page.getByRole('treeitem', { name: /Smoke/ })).toBeVisible()
     await page.getByRole('treeitem', { name: /Smoke/ }).click()
     await expect(page.getByText('Loading canvas...')).toBeHidden({ timeout: 15_000 })
+    const fontStatus = await page.evaluate(async () => {
+      const faces = Array.from(document.fonts).filter(
+        (face) => face.family === 'Excalifont'
+      )
+      const assetPath = (
+        window as Window & { EXCALIDRAW_ASSET_PATH?: string }
+      ).EXCALIDRAW_ASSET_PATH
+      const latinUrl = new URL(
+        './fonts/Excalifont/Excalifont-Regular-a88b72a24fb54c9f94e3b5fdaa7481c9.woff2',
+        assetPath
+      ).href
+      let fontBytes = 0
+      try {
+        const response = await fetch(latinUrl)
+        fontBytes = response.ok ? (await response.arrayBuffer()).byteLength : 0
+      } catch {}
+      const loads = await Promise.allSettled(faces.map((face) => face.load()))
+      return {
+        assetPath,
+        fontBytes,
+        faceCount: faces.length,
+        loaded: loads.every(
+          (result) => result.status === 'fulfilled' && result.value.status === 'loaded'
+        ),
+      }
+    })
+    expect(fontStatus.assetPath).toMatch(/\/assets\/excalidraw\/$/)
+    expect(fontStatus.fontBytes).toBeGreaterThan(0)
+    expect(fontStatus.faceCount).toBeGreaterThan(0)
+    expect(fontStatus.loaded).toBe(true)
 
-    await page.locator('[data-testid="toolbar-rectangle"]').click({ force: true })
+    await page.locator('[data-testid="toolbar-text"]').click({ force: true })
     const canvas = page.locator('canvas.interactive').filter({ visible: true }).first()
     const bounds = await canvas.boundingBox()
     expect(bounds).not.toBeNull()
-    await page.mouse.move(bounds!.x + 250, bounds!.y + 220)
-    await page.mouse.down()
-    await page.mouse.move(bounds!.x + 430, bounds!.y + 340, { steps: 10 })
-    await page.mouse.up()
+    await page.mouse.click(bounds!.x + 300, bounds!.y + 250)
+    const textEditor = page.locator('textarea.excalidraw-wysiwyg')
+    await expect(textEditor).toBeVisible()
+    await textEditor.fill('Hand drawn')
+    await textEditor.press('Control+Enter')
     await expect(page.getByRole('status', { name: 'Document save status' }))
       .toHaveText('Unsaved changes')
 
@@ -64,8 +88,15 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
     await expect(page.getByRole('status', { name: 'Document save status' }))
       .toHaveText('Saved')
     const saved = JSON.parse(await fs.readFile(drawingPath, 'utf8'))
-    expect(saved.elements.filter((element: { isDeleted?: boolean }) => !element.isDeleted))
-      .toHaveLength(1)
+    const visibleElements = saved.elements.filter(
+      (element: { isDeleted?: boolean }) => !element.isDeleted
+    )
+    expect(visibleElements).toHaveLength(1)
+    expect(visibleElements[0]).toMatchObject({
+      type: 'text',
+      text: 'Hand drawn',
+      fontFamily: 5,
+    })
   } finally {
     await application.close()
     await fs.rm(root, { recursive: true, force: true })
