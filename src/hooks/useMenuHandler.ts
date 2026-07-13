@@ -1,9 +1,6 @@
 import { useEffect } from 'react'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useStore } from '../store/useStore'
-import { convertPreferencesToRust } from '../lib/preferences'
+import { getNativeApi, type MenuCommand } from '../lib/native'
 import { isNamePromptOpen } from '../lib/namePrompt'
 import {
   createDrawing,
@@ -14,13 +11,6 @@ import type {
   ExcalidrawImperativeAPI,
   NormalizedZoomValue,
 } from '@excalidraw/excalidraw/types'
-
-export interface MenuCommand {
-  command: string
-  data?: {
-    directory?: string
-  }
-}
 
 const editorAPIs = new Map<string, ExcalidrawImperativeAPI>()
 
@@ -58,9 +48,7 @@ async function clearRecentDirectories() {
     ...state.preferences,
     recentDirectories: [],
   }
-  await invoke('save_preferences', {
-    preferences: convertPreferencesToRust(preferences),
-  })
+  await getNativeApi().preferences.save(preferences)
   useStore.getState().setPreferences(preferences)
 }
 
@@ -105,7 +93,7 @@ function resetCanvasZoom() {
 }
 
 async function toggleFullscreen() {
-  const appWindow = getCurrentWindow()
+  const appWindow = getNativeApi().window
   await appWindow.setFullscreen(!(await appWindow.isFullscreen()))
 
   globalThis.setTimeout(() => {
@@ -192,11 +180,11 @@ export async function executeMenuCommand({
       await toggleFullscreen()
       return
     case 'minimize':
-      await getCurrentWindow().minimize()
+      await getNativeApi().window.minimize()
       return
     case 'close_window':
     case 'quit':
-      await getCurrentWindow().close()
+      await getNativeApi().window.close()
       return
     case 'keyboard_shortcuts':
       showKeyboardShortcuts()
@@ -212,16 +200,10 @@ export async function executeMenuCommand({
 
 export function useMenuHandler() {
   useEffect(() => {
-    let unlisten: UnlistenFn | null = null
-
-    void listen<MenuCommand>('menu-command', (event) => {
-      void executeMenuCommand(event.payload)
-    }).then((cleanup) => {
-      unlisten = cleanup
+    const unlisten = getNativeApi().events.onMenuCommand((command) => {
+      void executeMenuCommand(command)
     })
 
-    return () => {
-      unlisten?.()
-    }
+    return unlisten
   }, [])
 }

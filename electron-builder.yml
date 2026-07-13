@@ -1,0 +1,57 @@
+appId: io.github.ramakrishnachilaka.rachana
+productName: Rachana
+copyright: Copyright © 2026 Rachana Contributors
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+asar: true
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+fileAssociations:
+  - ext: excalidraw
+    name: Excalidraw Drawing
+    description: Excalidraw drawing
+    mimeType: application/vnd.excalidraw+json
+    role: Editor
+mac:
+  category: public.app-category.productivity
+  minimumSystemVersion: 12.0
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  extendInfo:
+    ITSAppUsesNonExemptEncryption: false
+    NSDesktopFolderUsageDescription: Rachana needs access to folders you choose so it can open and save your visual canvases.
+    NSDocumentsFolderUsageDescription: Rachana needs access to folders you choose so it can open and save your visual canvases.
+    NSDownloadsFolderUsageDescription: Rachana needs access to folders you choose so it can open and save your visual canvases.
+    NSRemovableVolumesUsageDescription: Rachana needs access to removable volumes you choose so it can open and save your visual canvases.
+mas:
+  type: distribution
+  entitlements: build/entitlements.mas.plist
+  entitlementsInherit: build/entitlements.mas.inherit.plist
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: msi
+      arch:
+        - x64
+        - arm64
+linux:
+  category: Graphics
+  icon: build/icons
+  syncDesktopName: true
+  target:
+    - target: AppImage
+      arch:
+        - x64
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true

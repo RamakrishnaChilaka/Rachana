@@ -1,34 +1,33 @@
 ---
-applyTo: "src/**/*.{ts,tsx}"
-description: "Use when changing frontend behavior, Excalidraw lifecycle, persistence, performance, tests, or coverage."
+applyTo: "{src,electron}/**/*.{ts,tsx}"
+description: "Unit, integration, race, coverage, Electron smoke, and packaging validation."
 ---
 
-# Frontend Testing Instructions
+# Testing Instructions
 
-- Add focused unit or integration coverage for every behavior change.
-- Use the shared Tauri mocks in `src/test/setup.ts`; reset mutable mock state in
-  `beforeEach`. Do not duplicate module mocks across files without a behavior
-  reason.
-- Prefer public behavior and resulting store state over implementation details.
-  Use direct store calls only when testing the store action itself.
-- For editor performance changes, test the number and timing of scene
-  serializations rather than relying only on React render counts.
-- Cover initial scene restoration, viewport-only callbacks, idle buffering,
-  save-boundary flushing, stale `sceneVersion` rejection, and flusher cleanup
-  when those paths change.
-- For async store changes, include a race where state changes while an IPC call,
-  confirmation, or write is pending. Verify both disk-baseline advancement and
-  preservation of newer unsaved content.
-- For file-watcher changes, test burst coalescing, an event arriving during an
-  in-flight refresh, and stale directory results.
-- When using fake timers, restore real timers in `afterEach` so later tests are
-  isolated.
-- Run the narrowest affected Vitest file immediately after an edit, then run
-  `npm run typecheck`, `npm run test:run`, `npm run test:coverage`, and
-  `npm run build` before completion.
-- Live-test the production bundle with a non-empty Excalidraw scene. Do not claim
-  native WSL/Tauri rendering is fully verified unless that exact webview workflow
-  was reproduced.
+- Add focused tests for every behavior change. Race-sensitive persistence work
+  requires stale/concurrent coverage, not only a happy path.
+- Renderer tests use the shared typed bridge mocks in `src/test/setup.ts`.
+  Main-process service tests use the Node Vitest environment.
+- Test externally observable behavior and resulting store or disk state. Keep
+  unsafe casts at synthetic test boundaries.
+- Preserve coverage for restoration baselines, viewport-only callbacks, scene
+  buffering, synchronous flushes, stale scene rejection, unsaved lifecycle,
+  save races, Save As claims, external reconciliation, watcher bursts, stale
+  tree results, IPC security, and close vetoes.
+- Restore real timers after fake-timer tests.
+- Run the narrowest affected test immediately after each edit checkpoint.
+- Before completion run, in order:
+  1. `npm run typecheck`
+  2. `npm run test:run`
+  3. `npm run test:coverage`
+  4. `npm run build`
+  5. `npm run test:electron`
+  6. `npm run package`
+- The Playwright Electron test must launch bundled Chromium through Electron,
+  verify preload availability, edit a drawing, save it, and inspect the resulting
+  JSON on disk. Packaging validation must also run against the packaged binary.
 
-Current baseline: 25 test files, 154 tests, 71.13% statement coverage, 67.06%
-branch coverage, 79.95% function coverage, and 71.74% line coverage.
+Current baseline: 28 Vitest files, 161 tests, 70.54% statement coverage, 65.61%
+branch coverage, 78.75% function coverage, and 71.39% line coverage, plus one
+Playwright Electron workflow.

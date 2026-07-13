@@ -21,8 +21,8 @@ import {
   MoreHorizontal,
   Trash2,
 } from 'lucide-react'
-import { ask, message } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
+import { getNativeApi } from '../lib/native'
 import { drawingDisplayName } from '../lib/path'
 import { promptForName } from '../lib/namePrompt'
 import {
@@ -205,7 +205,7 @@ const TreeNode = memo(function TreeNode({
   const handleDelete = async () => {
     const itemName = displayName(node)
     try {
-      const confirmed = await ask(`Are you sure you want to delete "${itemName}"?`, {
+      const confirmed = await getNativeApi().dialogs.ask(`Are you sure you want to delete "${itemName}"?`, {
         title: 'Confirm Deletion',
         kind: 'warning',
         okLabel: 'Delete',
@@ -227,7 +227,7 @@ const TreeNode = memo(function TreeNode({
         ? error.message
         : `Failed to delete item: ${error}`
       try {
-        await message(errorMessage, {
+        await getNativeApi().dialogs.message(errorMessage, {
           title: isDeletionWarning ? 'Deletion Completed' : 'Error',
           kind: isDeletionWarning ? 'warning' : 'error',
         })

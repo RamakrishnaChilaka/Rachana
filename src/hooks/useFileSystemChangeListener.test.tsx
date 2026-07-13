@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TIMING } from '../constants'
 import { useStore } from '../store/useStore'
-import { mockListen } from '../test/setup'
+import { mockOnFileSystemChange } from '../test/setup'
 import { useFileSystemChangeListener } from './useFileSystemChangeListener'
 
 const originalLoadFileTree = useStore.getState().loadFileTree
@@ -13,9 +13,9 @@ let fileSystemChangeListener: (() => void) | null = null
 beforeEach(() => {
   vi.useFakeTimers()
   fileSystemChangeListener = null
-  mockListen.mockImplementation((_event, listener) => {
+  mockOnFileSystemChange.mockImplementation((listener) => {
     fileSystemChangeListener = listener as () => void
-    return Promise.resolve(vi.fn())
+    return vi.fn()
   })
 })
 

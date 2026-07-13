@@ -1,9 +1,7 @@
 import { create } from 'zustand'
-import { invoke } from '@tauri-apps/api/core'
 import { CachedExcalidrawScene, ExcalidrawFile, FileTreeNode, OpenTab, Preferences } from '../types'
-import { convertPreferencesFromRust, convertPreferencesToRust } from '../lib/preferences'
-import { ask } from '@tauri-apps/plugin-dialog'
 import { clampSidebarWidth, DEFAULT_SIDEBAR_WIDTH } from '../lib/layout'
+import { getNativeApi, type NativeFileContent } from '../lib/native'
 import {
   normalizePathForComparison,
   pathBasename,
@@ -97,23 +95,12 @@ export class DeletionRecoveryError extends Error {
   }
 }
 
-interface FileContentResult {
-  content: string
-  content_hash: string
-  file_identity: string
-}
-
 interface ExternalFileInspection {
   snapshot: OpenTab
   wasUnsaved: boolean
-  disk: FileContentResult | null
+  disk: NativeFileContent | null
   missing: boolean
   inspectionFailed: boolean
-}
-
-interface SaveFileResult {
-  content_hash: string
-  file_identity: string
 }
 
 async function getDeletionScopeTabIds(
@@ -125,11 +112,11 @@ async function getDeletionScopeTabIds(
     return new Set()
   }
 
-  const matches = await invoke<boolean[]>('get_deletion_scope_matches', {
+  const matches = await getNativeApi().workspace.getDeletionScopeMatches(
     targetPath,
     isDirectory,
-    candidatePaths: tabs.map((tab) => tab.path),
-  })
+    tabs.map((tab) => tab.path)
+  )
   if (!Array.isArray(matches) || matches.length !== tabs.length) {
     throw new Error('The native deletion scope response was invalid.')
   }
@@ -180,14 +167,8 @@ function toExcalidrawFile(tab: OpenTab): ExcalidrawFile {
 }
 
 async function readOpenTabFromDisk(file: ExcalidrawFile, sceneVersion = 0): Promise<OpenTab> {
-  const {
-    content,
-    content_hash: contentHash,
-    file_identity: fileIdentity,
-  } = await invoke<FileContentResult>(
-    'read_file_with_hash',
-    { filePath: file.path }
-  )
+  const { content, contentHash, fileIdentity } =
+    await getNativeApi().files.read(file.path)
 
   return toOpenTab(
     { ...file, modified: false },
@@ -340,12 +321,10 @@ async function prepareFallbackTab(
     }
   }
 
-  const disk = await invoke<FileContentResult>('read_file_with_hash', {
-    filePath: tab.path,
-  })
+  const disk = await getNativeApi().files.read(tab.path)
   if (
-    disk.content_hash === tab.contentHash &&
-    disk.file_identity === tab.fileIdentity
+    disk.contentHash === tab.contentHash &&
+    disk.fileIdentity === tab.fileIdentity
   ) {
     return { tab, source: 'cache' }
   }
@@ -354,8 +333,8 @@ async function prepareFallbackTab(
     tab: toOpenTab(
       toExcalidrawFile(tab),
       disk.content,
-      disk.content_hash,
-      disk.file_identity,
+      disk.contentHash,
+      disk.fileIdentity,
       tab.sceneVersion + 1
     ),
     source: 'disk',
@@ -477,7 +456,7 @@ async function confirmUnsavedChanges(
   fileName: string,
   actionDescription: string
 ): Promise<UnsavedChangesDecision> {
-  const shouldSave = await ask(
+  const shouldSave = await getNativeApi().dialogs.ask(
     `Do you want to save changes to "${fileName}" before ${actionDescription}?`,
     {
       title: 'Unsaved Changes',
@@ -491,7 +470,7 @@ async function confirmUnsavedChanges(
     return 'save'
   }
 
-  const shouldDiscard = await ask(
+  const shouldDiscard = await getNativeApi().dialogs.ask(
     `Discard unsaved changes to "${fileName}"?`,
     {
       title: 'Discard Unsaved Changes',
@@ -881,8 +860,8 @@ export const useStore = create<AppStore>((set, get) => ({
   loadDirectory: async (dir) => {
     try {
       const [files, fileTree] = await Promise.all([
-        invoke<ExcalidrawFile[]>('list_excalidraw_files', { directory: dir }),
-        invoke<FileTreeNode[]>('get_file_tree', { directory: dir })
+        getNativeApi().workspace.listFiles(dir),
+        getNativeApi().workspace.getFileTree(dir),
       ])
 
       if (!(await get().resolveUnsavedTabsBeforeWorkspaceChange())) {
@@ -891,7 +870,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
       const state = get()
       if (state.presentationMode && state.preferences.showDecorations) {
-        await invoke('set_menu_visible', { visible: true }).catch((error) => {
+        await getNativeApi().window.setMenuVisible(true).catch((error) => {
           console.error('Failed to restore menu before loading directory:', error)
         })
       }
@@ -928,7 +907,7 @@ export const useStore = create<AppStore>((set, get) => ({
       await get().savePreferences()
 
       // Start watching directory
-      await invoke('watch_directory', { directory: dir })
+      await getNativeApi().workspace.watch(dir)
       return true
     } catch (error) {
       console.error('Failed to load directory:', error)
@@ -942,9 +921,7 @@ export const useStore = create<AppStore>((set, get) => ({
   loadFileTree: async (dir) => {
     const requestId = ++nextFileTreeRequestId
     try {
-      const fileTree = await invoke<FileTreeNode[]>('get_file_tree', {
-        directory: dir,
-      })
+      const fileTree = await getNativeApi().workspace.getFileTree(dir)
 
       const currentDirectory = get().currentDirectory
       if (
@@ -1048,9 +1025,7 @@ export const useStore = create<AppStore>((set, get) => ({
       }
 
       try {
-        const disk = await invoke<FileContentResult>('read_file_with_hash', {
-          filePath: tab.path,
-        })
+        const disk = await getNativeApi().files.read(tab.path)
         return {
           snapshot: tab,
           wasUnsaved: candidate.wasUnsaved,
@@ -1205,8 +1180,8 @@ export const useStore = create<AppStore>((set, get) => ({
         }
 
         const diskChanged =
-          result.disk.content_hash !== currentTab.contentHash ||
-          result.disk.file_identity !== currentTab.fileIdentity
+          result.disk.contentHash !== currentTab.contentHash ||
+          result.disk.fileIdentity !== currentTab.fileIdentity
         if (!diskChanged) {
           if (currentTab.externalConflict === 'modified-on-disk') {
             const resolvedTab = {
@@ -1252,8 +1227,8 @@ export const useStore = create<AppStore>((set, get) => ({
           ...toOpenTab(
             toExcalidrawFile(currentTab),
             result.disk.content,
-            result.disk.content_hash,
-            result.disk.file_identity,
+            result.disk.contentHash,
+            result.disk.fileIdentity,
             currentTab.sceneVersion + 1
           ),
           lifecycleVersion: nextLifecycleVersion(currentTab),
@@ -1372,11 +1347,9 @@ export const useStore = create<AppStore>((set, get) => ({
           return
         }
 
-        let disk: FileContentResult
+        let disk: NativeFileContent
         try {
-          disk = await invoke<FileContentResult>('read_file_with_hash', {
-            filePath: existingTab.path,
-          })
+          disk = await getNativeApi().files.read(existingTab.path)
         } catch (error) {
           if (isMissingFileError(error) && existingTab.modified) {
             const currentTab = get().openTabs.find(
@@ -1420,8 +1393,8 @@ export const useStore = create<AppStore>((set, get) => ({
         }
 
         const diskMatches =
-          disk.content_hash === existingTab.contentHash &&
-          disk.file_identity === existingTab.fileIdentity
+          disk.contentHash === existingTab.contentHash &&
+          disk.fileIdentity === existingTab.fileIdentity
         if (diskMatches) {
           set({
             activeFile: toExcalidrawFile(existingTab),
@@ -1454,8 +1427,8 @@ export const useStore = create<AppStore>((set, get) => ({
         const updatedTab = toOpenTab(
           toExcalidrawFile(existingTab),
           disk.content,
-          disk.content_hash,
-          disk.file_identity,
+          disk.contentHash,
+          disk.fileIdentity,
           existingTab.sceneVersion + 1
         )
         set((currentState) => ({
@@ -1608,10 +1581,7 @@ export const useStore = create<AppStore>((set, get) => ({
           return false
         }
 
-        const {
-          content_hash: contentHash,
-          file_identity: fileIdentity,
-        } = await invoke<SaveFileResult>('save_file', {
+        const { contentHash, fileIdentity } = await getNativeApi().files.save({
           filePath: activeFile.path,
           content: contentToSave,
           expectedHash: beforeWriteTab.contentHash,
@@ -1700,7 +1670,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
     let destination: string | null
     try {
-      destination = await invoke<string | null>('select_save_file_path')
+      destination = await getNativeApi().files.selectSavePath()
     } catch (error) {
       console.error('[saveTabAs] Failed to select destination:', error)
       alert(`Failed to select a save destination: ${error}`)
@@ -1771,10 +1741,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const saveOperationId = get().beginSaveOperation(sourceTab.path)
     let saveOperationEnded = false
     try {
-      const {
-        content_hash: contentHash,
-        file_identity: fileIdentity,
-      } = await invoke<SaveFileResult>('save_file_as', {
+      const { contentHash, fileIdentity } = await getNativeApi().files.saveAs({
         filePath: destination,
         content: sourceTab.cachedContent,
         openPaths: currentState.openTabs.map((tab) => tab.path),
@@ -1881,10 +1848,7 @@ export const useStore = create<AppStore>((set, get) => ({
           return false
         }
 
-        const {
-          content_hash: contentHash,
-          file_identity: fileIdentity,
-        } = await invoke<SaveFileResult>('save_file', {
+        const { contentHash, fileIdentity } = await getNativeApi().files.save({
           filePath: tab.path,
           content: tab.cachedContent,
           expectedHash: beforeWriteTab.contentHash,
@@ -2041,7 +2005,7 @@ export const useStore = create<AppStore>((set, get) => ({
     if (!currentDirectory) {
       // Prompt to select a directory if none is selected
       try {
-        const dir = await invoke<string | null>('select_directory')
+        const dir = await getNativeApi().workspace.selectDirectory()
         if (!dir) {
           return
         }
@@ -2064,10 +2028,10 @@ export const useStore = create<AppStore>((set, get) => ({
 
     try {
       // Create the new file
-      const filePath = await invoke<string>('create_new_file', {
-        directory: targetDirectory,
-        fileName: requestedFileName,
-      })
+      const filePath = await getNativeApi().workspace.createFile(
+        targetDirectory,
+        requestedFileName
+      )
 
       // Reload the file tree to show the new file
       await state.loadFileTree(currentDirectory)
@@ -2096,7 +2060,7 @@ export const useStore = create<AppStore>((set, get) => ({
     if (!currentDirectory) {
       // Prompt to select a directory if none is selected
       try {
-        const dir = await invoke<string | null>('select_directory')
+        const dir = await getNativeApi().workspace.selectDirectory()
         if (!dir) {
           return
         }
@@ -2115,10 +2079,10 @@ export const useStore = create<AppStore>((set, get) => ({
     const targetDirectory = directory || currentDirectory
 
     try {
-      await invoke<string>('create_new_folder', {
-        directory: targetDirectory,
-        folderName: finalFolderName,
-      })
+      await getNativeApi().workspace.createFolder(
+        targetDirectory,
+        finalFolderName
+      )
 
       // Reload the file tree to show the new folder
       await state.loadFileTree(currentDirectory)
@@ -2136,10 +2100,7 @@ export const useStore = create<AppStore>((set, get) => ({
         ? newName
         : `${newName}.excalidraw`
 
-      const newPath = await invoke<string>('rename_file', {
-        oldPath,
-        newName: finalName,
-      })
+      const newPath = await getNativeApi().workspace.renameFile(oldPath, finalName)
 
       const state = get()
       const renamedFile = state.activeFile?.path === oldPath
@@ -2178,10 +2139,7 @@ export const useStore = create<AppStore>((set, get) => ({
   // Rename folder
   renameFolder: async (oldPath, newName) => {
     try {
-      const newPath = await invoke<string>('rename_folder', {
-        oldPath,
-        newName,
-      })
+      const newPath = await getNativeApi().workspace.renameFolder(oldPath, newName)
 
       const state = get()
       const updatedTabs = state.openTabs.map((tab) => {
@@ -2285,7 +2243,7 @@ export const useStore = create<AppStore>((set, get) => ({
         throw new Error('The drawing changed while deletion was pending. Review it and try again.')
       }
 
-      await invoke('delete_file', { filePath })
+      await getNativeApi().workspace.deleteFile(filePath)
       if (fallbackSnapshot && !fallbackSnapshot.modified) {
         try {
           preparedFallback = await revalidateCleanFallbackAfterDelete(
@@ -2444,7 +2402,7 @@ export const useStore = create<AppStore>((set, get) => ({
         throw new Error('The folder contents changed while deletion was pending. Review them and try again.')
       }
 
-      await invoke('delete_folder', { folderPath })
+      await getNativeApi().workspace.deleteFolder(folderPath)
       if (fallbackSnapshot && !fallbackSnapshot.modified) {
         try {
           preparedFallback = await revalidateCleanFallbackAfterDelete(
@@ -2541,21 +2499,16 @@ export const useStore = create<AppStore>((set, get) => ({
   // Load preferences
   loadPreferences: async () => {
     try {
-      // The Rust backend returns snake_case fields
-      const prefs = await invoke<any>('get_preferences')
-
-      // Convert snake_case from Rust to camelCase for TypeScript
-      const safePrefs = convertPreferencesFromRust(prefs)
+      const prefs = await getNativeApi().preferences.get()
+      const safePrefs = {
+        ...prefs,
+        sidebarWidth: clampSidebarWidth(prefs.sidebarWidth),
+      }
 
       set({
         preferences: safePrefs,
         sidebarVisible: safePrefs.sidebarVisible,
       })
-
-      // Apply decorations preference
-      if (safePrefs.showDecorations === false) {
-        invoke('set_decorations', { visible: false })
-      }
 
       // Auto-load last directory if it exists
       if (safePrefs.lastDirectory) {
@@ -2591,9 +2544,7 @@ export const useStore = create<AppStore>((set, get) => ({
   savePreferences: async () => {
     const { preferences } = get()
     try {
-      // Convert camelCase to snake_case for Rust backend
-      const prefsToSave = convertPreferencesToRust(preferences)
-      await invoke('save_preferences', { preferences: prefsToSave })
+      await getNativeApi().preferences.save(preferences)
     } catch (error) {
       console.error('Failed to save preferences:', error)
     }
@@ -2618,13 +2569,13 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ presentationMode: entering })
 
     if (entering) {
-      invoke('set_menu_visible', { visible: false }).catch((error) => {
+      getNativeApi().window.setMenuVisible(false).catch((error) => {
         console.error('Failed to hide menu for presentation mode:', error)
         set({ presentationMode: false })
       })
     } else {
       if (state.preferences.showDecorations) {
-        invoke('set_menu_visible', { visible: true }).catch((error) => {
+        getNativeApi().window.setMenuVisible(true).catch((error) => {
           console.error('Failed to restore menu after presentation mode:', error)
         })
       }

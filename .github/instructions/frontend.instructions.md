@@ -1,57 +1,28 @@
 ---
 applyTo: "src/**/*.{ts,tsx,css}"
-description: "Use when changing React UI, Zustand state, Excalidraw lifecycle, tabs, menus, preferences, or frontend styling."
+description: "React, Zustand, Excalidraw lifecycle, tabs, native bridge calls, and frontend styling."
 ---
 
-# Frontend Architecture Instructions
+# Frontend Instructions
 
-## State And Lifecycle
-
-- `useStore.ts` is a coordinator, not a generic bag of setters. Expose named
-  actions that preserve invariants instead of adding raw state setters.
-- Capture a snapshot before asynchronous work, then call `get()` again and
-  compare `tabId`, content, hashes, identity, scene/lifecycle versions, and
-  conflict state before committing results.
-- Use `pathsEqual()` or normalized path keys for cross-platform comparisons.
-  Use exact paths only where the native command contract requires them.
-- Derive unsaved state through `isUnsavedTab()` and save labels through
-  `getActiveDocumentSaveStatus()`; do not create competing booleans.
-- Preferences are cached in Zustand but persisted by Tauri. A preference change
-  is incomplete until `savePreferences()` succeeds or the failure is handled.
-- Coalesce native watcher bursts in `useFileSystemChangeListener.ts`. Keep one
-  trailing refresh when events arrive during an in-flight refresh, and reject
-  file-tree results for superseded requests or directories.
-
-## Excalidraw
-
-- Keep the runtime SDK lazy. `import type` from
-  `@excalidraw/excalidraw/types` or `element/types`; dynamically import the
-  component itself.
-- Excalidraw elements are immutable. Detect scene changes by array length and
-  element reference identity, as `didSceneElementsChange()` does.
-- `initialData` is stable for one pane instance. A `sceneVersion` key remounts
-  the pane when disk content must replace it.
-- Keep every open editor mounted because Excalidraw's unmount lifecycle clears
-  undo history. Inactive panes use `display: none` and Excalidraw view mode to
-  detach edit-only listeners; scroll detection stays disabled for the fixed
-  viewport. React `Activity` also runs Excalidraw's destructive cleanup and must
-  not wrap editor panes.
-- The first restored `onChange` establishes `lastElementsRef`; it is not a user
-  edit. Viewport-only callbacks must remain no-ops for persistence.
-- Buffer the latest elements/appState/files in refs. On idle, persist only the
-  intentional app-state fields and update the exact `tabId` if its
-  `sceneVersion` is still current.
-- Register menu canvas APIs by `tabId` with identity-safe cleanup. Commands must
-  resolve the active registration when they execute, including delayed
-  fullscreen callbacks.
-
-## UI And Styling
-
-- Use existing Radix primitives and Lucide icons. Preserve keyboard navigation,
-  focus-visible states, ARIA roles/labels, and native-window drag/resize regions.
-- Keep sidebar width constants in `src/lib/layout.ts`; do not duplicate them in
-  component or global constant modules.
-- Keep platform detection in `src/lib/platform.ts`; CSS consumes
-  `html[data-platform='linux'|'macos']` for text rendering and window chrome.
-- Avoid broad Zustand subscriptions in components. Select only rendered state;
-  use `useStore.getState()` inside high-frequency callbacks.
+- Renderer code is browser-only. Never import Node or Electron modules; call
+  named methods on the typed `window.rachana` bridge.
+- Keep `useStore.ts` as the coordinator for tabs, save transactions, conflicts,
+  recovery, deletion, and workspace mutation. Do not add raw setters that bypass
+  these invariants.
+- Identify tabs by `tabId`, not path. After every `await`, re-read Zustand state
+  and verify relevant content, hash, identity, `sceneVersion`, and
+  `lifecycleVersion` snapshots before applying results.
+- Preserve unsaved semantics for `deleted-on-disk` and `modified-on-disk` tabs.
+  Never silently overwrite their original paths.
+- Keep Excalidraw runtime imports dynamic. Buffer `onChange` scenes in refs and
+  keep full-scene serialization and Zustand writes out of pointer hot paths.
+- Flush pending scenes before Save, Save As, workspace resolution, tab
+  deactivation, and editor unmount. Reject stale `sceneVersion` writes.
+- Keep inactive editor panes mounted so undo history survives. Hide them with
+  `display: none`, use view mode, and disable scroll detection; never wrap them
+  in React `Activity`.
+- Resolve canvas APIs by active `tabId` and use identity-safe cleanup so stale
+  pane teardown cannot remove a newer registration.
+- Preserve Radix, Lucide, accessibility, focus, custom titlebar, and platform CSS
+  patterns already used in the application.

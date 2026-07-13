@@ -13,16 +13,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-macos:
-    name: Build macOS DMG
-    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && vars.RACHANA_MACOS_RELEASE_ENABLED == 'true' }}
-    runs-on: macos-15
-    environment: release
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
-      APP_NAME: Rachana
-      MACOS_SIGNED_RELEASE: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
-
+  validate:
+    name: Validate Electron app
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -30,107 +23,223 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Run unit and integration tests
         run: npm run test:run
 
-      - name: Import Developer ID signing certificate
-        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+      - name: Build unpacked Electron app
+        run: npm run package
+
+      - name: Run packaged Electron smoke workflow
         env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
-          DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
-        run: |
-          set -euo pipefail
+          RACHANA_ELECTRON_EXECUTABLE: ${{ github.workspace }}/release/linux-unpacked/rachana
+        run: xvfb-run -a npx playwright test --config playwright.config.ts
 
-          KEYCHAIN_PATH="$RUNNER_TEMP/developer-id-signing.keychain-db"
-          KEYCHAIN_PASSWORD="$(uuidgen)"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+  build-linux:
+    name: Build Linux x64 AppImage
+    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
 
-          test -n "$APPLE_TEAM_ID"
-          test -n "$DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64"
-          test -n "$DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD"
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
 
-          echo "$DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id-application.p12"
+      - name: Install dependencies
+        run: npm ci
 
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          security import "$RUNNER_TEMP/developer-id-application.p12" \
-            -k "$KEYCHAIN_PATH" \
-            -P "$DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign
-
-          security list-keychains -d user -s "$KEYCHAIN_PATH"
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-
-      - name: Prepare notarization credentials
-        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
-        env:
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
-        run: |
-          set -euo pipefail
-
-          test -n "$APPLE_API_KEY_ID"
-          test -n "$APPLE_API_ISSUER"
-          test -n "$APPLE_API_PRIVATE_KEY_BASE64"
-
-          APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          echo "$APPLE_API_PRIVATE_KEY_BASE64" | base64 --decode > "$APPLE_API_KEY_PATH"
-          chmod 600 "$APPLE_API_KEY_PATH"
-          echo "APPLE_API_KEY_PATH=$APPLE_API_KEY_PATH" >> "$GITHUB_ENV"
-
-      - name: Build signed and notarized Apple Silicon DMG
-        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
-        env:
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: npm run release:mac -- --notarize
-
-      - name: Build unsigned Apple Silicon DMG
-        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED != 'true' }}
-        run: npm run tauri -- build --bundles app,dmg --target aarch64-apple-darwin
+      - name: Build AppImage
+        run: npm run build && npx electron-builder --linux AppImage --x64 --publish never
 
       - name: Stage release assets
         run: |
           set -euo pipefail
-
           mkdir -p dist/github-release
+          mapfile -t artifacts < <(find release -maxdepth 1 -type f -name '*.AppImage' -print)
+          test "${#artifacts[@]}" -eq 1
+          artifact="${artifacts[0]}"
+          destination="dist/github-release/Rachana-${GITHUB_REF_NAME}-linux-x86_64.AppImage"
+          cp "$artifact" "$destination"
+          (cd "$(dirname "$destination")" && sha256sum "$(basename "$destination")" > "$(basename "$destination").sha256")
 
-          if [[ "$MACOS_SIGNED_RELEASE" == "true" ]]; then
-            find "dist/releases/macos/Rachana-${GITHUB_REF_NAME}" -maxdepth 1 -type f -print -exec cp {} dist/github-release/ \;
-          else
-            dmg_path="$(find "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle/dmg" -maxdepth 1 -name "*.dmg" -print -quit)"
-            test -n "$dmg_path"
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rachana-linux-x86_64-appimage
+          path: dist/github-release/*
+          if-no-files-found: error
 
-            release_dmg="dist/github-release/Rachana-${GITHUB_REF_NAME}-macos-arm64-unsigned.dmg"
-            cp "$dmg_path" "$release_dmg"
-            checksum="$(shasum -a 256 "$release_dmg" | awk '{print $1}')"
-            printf '%s  %s\n' "$checksum" "$(basename "$release_dmg")" > "$release_dmg.sha256"
-          fi
+  build-windows:
+    name: Build Windows ${{ matrix.label }} installers
+    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            label: x86_64
+            node_arch: x64
+            builder_arch: x64
+            targets: nsis msi
+            require_msi: true
+          - runner: windows-11-arm
+            label: arm64
+            node_arch: arm64
+            builder_arch: arm64
+            targets: nsis
+            require_msi: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          architecture: ${{ matrix.node_arch }}
+          cache: npm
+
+      - name: Verify Node architecture
+        shell: pwsh
+        run: |
+          $actual = node -p "process.arch"
+          if ($actual -ne "${{ matrix.node_arch }}") {
+            throw "Expected Node ${{ matrix.node_arch }}, found $actual."
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows installers
+        run: npm run build && npx electron-builder --win ${{ matrix.targets }} --${{ matrix.builder_arch }} --publish never
+
+      - name: Stage release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path 'dist/github-release' | Out-Null
+          $exe = @(Get-ChildItem 'release/*.exe' -File)
+          $msi = @(Get-ChildItem 'release/*.msi' -File)
+          if ($exe.Count -ne 1) {
+            throw "Expected one NSIS installer; found $($exe.Count)."
+          }
+          $exeDestination = "dist/github-release/Rachana-$env:GITHUB_REF_NAME-windows-${{ matrix.label }}-setup.exe"
+          Copy-Item $exe[0].FullName $exeDestination
+          $assets = @($exeDestination)
+          if ('${{ matrix.require_msi }}' -eq 'true') {
+            if ($msi.Count -ne 1) {
+              throw "Expected one MSI installer; found $($msi.Count)."
+            }
+            $msiDestination = "dist/github-release/Rachana-$env:GITHUB_REF_NAME-windows-${{ matrix.label }}.msi"
+            Copy-Item $msi[0].FullName $msiDestination
+            $assets += $msiDestination
+          } elseif ($msi.Count -ne 0) {
+            throw "Expected no ARM64 MSI installer; found $($msi.Count)."
+          }
+          foreach ($asset in $assets) {
+            $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLowerInvariant()
+            "$hash  $(Split-Path -Leaf $asset)" | Set-Content -Encoding ascii "$asset.sha256"
+          }
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rachana-windows-${{ matrix.label }}-installers
+          path: dist/github-release/*
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS arm64 DMG
+    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && vars.RACHANA_MACOS_RELEASE_ENABLED == 'true' }}
+    needs: validate
+    runs-on: macos-15
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Import Developer ID certificate
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$CERTIFICATE_BASE64"
+          test -n "$CERTIFICATE_PASSWORD"
+          keychain="$RUNNER_TEMP/rachana-signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/developer-id.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -s "$keychain"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+
+      - name: Prepare notarization key
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+        env:
+          PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$PRIVATE_KEY_BASE64"
+          key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          echo "$PRIVATE_KEY_BASE64" | base64 --decode > "$key"
+          chmod 600 "$key"
+          echo "APPLE_API_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Build signed and notarized DMG
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
+        env:
+          CSC_NAME: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npm run build && npx electron-builder --mac dmg --arm64 --publish never --config.mac.notarize=true
+
+      - name: Build unsigned DMG
+        if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED != 'true' }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run build && npx electron-builder --mac dmg --arm64 --publish never --config.mac.notarize=false
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist/github-release
+          shopt -s nullglob
+          artifacts=(release/*.dmg)
+          test "${#artifacts[@]}" -eq 1
+          artifact="${artifacts[0]}"
+          signed_label="unsigned"
+          if [[ "${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED }}" == "true" ]]; then signed_label="signed"; fi
+          destination="dist/github-release/Rachana-${GITHUB_REF_NAME}-macos-arm64-${signed_label}.dmg"
+          cp "$artifact" "$destination"
+          (cd "$(dirname "$destination")" && shasum -a 256 "$(basename "$destination")" > "$(basename "$destination").sha256")
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v7
@@ -139,184 +248,13 @@ jobs:
           path: dist/github-release/*
           if-no-files-found: error
 
-  build-linux:
-    name: Build Linux AppImage
-    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' }}
-    runs-on: ubuntu-24.04
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
-      RELEASE_DIR: dist/github-release
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Install Linux build dependencies
-        run: |
-          set -euo pipefail
-
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm run test:run
-
-      - name: Run native tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-
-      - name: Build Linux AppImage
-        run: npm run tauri -- build --bundles appimage
-
-      - name: Stage release asset
-        run: |
-          set -euo pipefail
-
-          mkdir -p "$RELEASE_DIR"
-          appimage_path="$(find "$CARGO_TARGET_DIR/release/bundle/appimage" -maxdepth 1 -name "*.AppImage" -print -quit)"
-          test -n "$appimage_path"
-
-          release_appimage="$RELEASE_DIR/Rachana-${GITHUB_REF_NAME}-linux-x86_64.AppImage"
-          cp "$appimage_path" "$release_appimage"
-          echo "RELEASE_APPIMAGE=$release_appimage" >> "$GITHUB_ENV"
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: rachana-linux-x86_64-appimage
-          path: ${{ env.RELEASE_APPIMAGE }}
-          if-no-files-found: error
-
-  build-windows:
-    name: Build Windows ${{ matrix.arch }} Installers
-    if: ${{ vars.RACHANA_DISTRIBUTION_ENABLED == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-2025
-            arch: x86_64
-            node_arch: x64
-            rust_host: x86_64-pc-windows-msvc
-          - runner: windows-11-arm
-            arch: arm64
-            node_arch: arm64
-            rust_host: aarch64-pc-windows-msvc
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}\src-tauri\target
-      RELEASE_DIR: dist\github-release
-      WINDOWS_ARCH: ${{ matrix.arch }}
-      EXPECTED_NODE_ARCH: ${{ matrix.node_arch }}
-      EXPECTED_RUST_HOST: ${{ matrix.rust_host }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          architecture: ${{ matrix.node_arch }}
-          cache: npm
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Verify native toolchain architecture
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $nodeArch = node -p "process.arch"
-          $rustHost = (rustc -vV | Select-String '^host: ').Line.Substring(6)
-          if ($nodeArch -ne $env:EXPECTED_NODE_ARCH) {
-            throw "Expected Node $env:EXPECTED_NODE_ARCH, found $nodeArch."
-          }
-          if ($rustHost -ne $env:EXPECTED_RUST_HOST) {
-            throw "Expected Rust host $env:EXPECTED_RUST_HOST, found $rustHost."
-          }
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm run test:run
-
-      - name: Build Windows NSIS and MSI installers
-        run: npm run tauri -- build --bundles nsis,msi
-
-      - name: Stage release assets
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          New-Item -ItemType Directory -Force -Path $env:RELEASE_DIR | Out-Null
-
-          $nsisFiles = @(Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\nsis\*.exe" -File)
-          $msiFiles = @(Get-ChildItem "$env:CARGO_TARGET_DIR\release\bundle\msi\*.msi" -File)
-          if ($nsisFiles.Count -ne 1 -or $msiFiles.Count -ne 1) {
-            throw "Expected exactly one NSIS and one MSI installer; found $($nsisFiles.Count) and $($msiFiles.Count)."
-          }
-          $nsis = $nsisFiles[0]
-          $msi = $msiFiles[0]
-
-          $nsisRelease = Join-Path $env:RELEASE_DIR "Rachana-$env:GITHUB_REF_NAME-windows-$env:WINDOWS_ARCH-setup.exe"
-          $msiRelease = Join-Path $env:RELEASE_DIR "Rachana-$env:GITHUB_REF_NAME-windows-$env:WINDOWS_ARCH.msi"
-          Copy-Item $nsis.FullName $nsisRelease
-          Copy-Item $msi.FullName $msiRelease
-
-          foreach ($asset in @($nsisRelease, $msiRelease)) {
-            $hash = (Get-FileHash -Algorithm SHA256 $asset).Hash.ToLowerInvariant()
-            "$hash  $(Split-Path -Leaf $asset)" | Set-Content -Encoding ascii "$asset.sha256"
-          }
-
-      - name: Upload release artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: rachana-windows-${{ matrix.arch }}-installers
-          path: dist/github-release/*
-          if-no-files-found: error
-
   github-release:
     name: Create GitHub Release
-    if: ${{ always() && vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && needs.build-linux.result == 'success' && needs.build-windows.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
-    needs:
-      - build-macos
-      - build-linux
-      - build-windows
+    if: ${{ always() && vars.RACHANA_DISTRIBUTION_ENABLED == 'true' && needs.validate.result == 'success' && needs.build-linux.result == 'success' && needs.build-windows.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
+    needs: [validate, build-linux, build-windows, build-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-
     steps:
       - name: Download release artifacts
         uses: actions/download-artifact@v7
@@ -335,15 +273,12 @@ jobs:
           body: |
             ## Downloads
 
-            - **Windows x86_64:** NSIS setup `.exe` or Windows Installer `.msi`
-            - **Windows ARM64:** NSIS setup `.exe` or Windows Installer `.msi`
+            - **Windows x86_64:** NSIS setup `.exe` or MSI
+            - **Windows ARM64:** NSIS setup `.exe`
             - **Linux x86_64:** AppImage
-            - **macOS Apple Silicon:** DMG
+            - **macOS Apple Silicon:** DMG when enabled
 
-            > Windows installers are currently unsigned and may trigger Microsoft Defender SmartScreen. Verify the adjacent `.sha256` file before installation.
-
-            > The Windows ARM64 application is native ARM64. Its NSIS setup wrapper runs through Windows x86 emulation, as documented by Tauri.
-
-            > The macOS DMG is currently unsigned. On first launch, Control-click Rachana in Finder, choose **Open**, then confirm **Open**.
+            Rachana 0.2 uses the bundled Electron Chromium runtime on every platform.
+            Unsigned installers may trigger platform security warnings; verify the adjacent SHA-256 file before installation.
 
             [View the source for this release](https://github.com/${{ github.repository }}/tree/${{ github.ref_name }})

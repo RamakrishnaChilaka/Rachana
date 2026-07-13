@@ -1,7 +1,4 @@
 import { useEffect } from 'react'
-import { listen } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
-import { ask, message } from '@tauri-apps/plugin-dialog'
 import { Sidebar } from './components/Sidebar'
 import { ExcalidrawEditor } from './components/ExcalidrawEditor'
 import { LaserPointer } from './components/LaserPointer'
@@ -13,6 +10,7 @@ import { useResolvedTheme } from './hooks/useResolvedTheme'
 import { useAutoSave } from './hooks/useAutoSave'
 import { useFileSystemChangeListener } from './hooks/useFileSystemChangeListener'
 import { handleAppCloseRequest } from './lib/tabLifecycle'
+import { getNativeApi } from './lib/native'
 
 function App() {
   const loadPreferences = useStore((state) => state.loadPreferences)
@@ -30,12 +28,15 @@ function App() {
 
   // Listen for window close event
   useEffect(() => {
-    const unlisten = listen('check-unsaved-before-close', async () => {
+    const native = getNativeApi()
+    const unlisten = native.events.onCheckUnsavedBeforeClose(async () => {
       const state = useStore.getState()
-      await handleAppCloseRequest(
-        state.openTabs,
-        state.activeFile?.path ?? null,
-        {
+      let closeApproved = false
+      try {
+        closeApproved = await handleAppCloseRequest(
+          state.openTabs,
+          state.activeFile?.path ?? null,
+          {
           getCurrentState: () => {
             const current = useStore.getState()
             return {
@@ -43,7 +44,7 @@ function App() {
               activePath: current.activeFile?.path ?? null,
             }
           },
-          confirmSave: () => ask(
+          confirmSave: () => native.dialogs.ask(
             'Do you want to save your changes before closing?',
             {
               title: 'Unsaved Changes',
@@ -52,7 +53,7 @@ function App() {
               cancelLabel: "Don't Save",
             }
           ),
-          confirmDiscard: () => ask(
+          confirmDiscard: () => native.dialogs.ask(
             'Close without saving your changes?',
             {
               title: 'Confirm Close',
@@ -63,7 +64,7 @@ function App() {
           ),
           saveActive: () => useStore.getState().saveCurrentFile(),
           notifyBlocked: async (unsavedCount) => {
-            await message(
+            await native.dialogs.message(
               `${unsavedCount} drawing${unsavedCount === 1 ? ' has' : 's have'} unsaved or recovery changes. Save or close those tabs before quitting.`,
               {
                 title: 'Unsaved Drawings',
@@ -71,13 +72,18 @@ function App() {
               }
             )
           },
-          forceClose: () => invoke('force_close_app'),
+            forceClose: () => native.app.forceClose(),
+          }
+        )
+      } finally {
+        if (!closeApproved) {
+          await native.app.cancelClose()
         }
-      )
+      }
     })
 
     return () => {
-      unlisten.then((fn) => fn())
+      unlisten()
     }
   }, [])
 

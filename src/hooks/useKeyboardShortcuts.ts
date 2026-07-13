@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { useStore } from '../store/useStore'
 import { isNamePromptOpen, promptForName } from '../lib/namePrompt'
+import { getNativeApi } from '../lib/native'
 import { executeMenuCommand, saveActiveTabAs } from './useMenuHandler'
 
 export function useKeyboardShortcuts() {
@@ -58,7 +58,7 @@ export function useKeyboardShortcuts() {
       // Cmd/Ctrl + O: Open directory
       if (modKey && e.key === 'o') {
         e.preventDefault()
-        const dir = await invoke<string | null>('select_directory')
+        const dir = await getNativeApi().workspace.selectDirectory()
         if (dir) {
           await state.loadDirectory(dir)
         }
@@ -70,7 +70,7 @@ export function useKeyboardShortcuts() {
 
         // If no directory is selected, select one first
         if (!state.currentDirectory) {
-          const dir = await invoke<string | null>('select_directory')
+          const dir = await getNativeApi().workspace.selectDirectory()
           if (dir) {
             await state.loadDirectory(dir)
           } else {
@@ -96,7 +96,7 @@ export function useKeyboardShortcuts() {
 
         // If no directory is selected, select one first
         if (!state.currentDirectory) {
-          const dir = await invoke<string | null>('select_directory')
+          const dir = await getNativeApi().workspace.selectDirectory()
           if (dir) {
             await state.loadDirectory(dir)
           } else {

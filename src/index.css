@@ -104,12 +104,6 @@ textarea:not(.excalidraw-wysiwyg),
   font-synthesis: initial;
 }
 
-/* Match WebKitGTK's text editor rasterization to committed canvas text. */
-html[data-platform='linux'] .excalidraw textarea.excalidraw-wysiwyg {
-  -webkit-font-smoothing: antialiased;
-  -webkit-text-stroke: 0.025em currentColor;
-}
-
 button,
 input {
   font-size: inherit;
@@ -198,6 +192,11 @@ input:focus-visible,
   min-width: 0.75rem;
   height: 100%;
   flex: 1;
+}
+
+[data-electron-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
 }
 
 .macos-traffic-light-space {

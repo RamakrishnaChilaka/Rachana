@@ -7,20 +7,10 @@ import {
   Square,
   X,
 } from 'lucide-react'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { getNativeApi, type ResizeDirection } from '../lib/native'
 import { useStore } from '../store/useStore'
 import { AppMenu } from './AppMenu'
 import { TabBar } from './TabBar'
-
-type ResizeDirection =
-  | 'East'
-  | 'North'
-  | 'NorthEast'
-  | 'NorthWest'
-  | 'South'
-  | 'SouthEast'
-  | 'SouthWest'
-  | 'West'
 
 const isMacOS = /Macintosh|Mac OS X/i.test(navigator.userAgent)
 
@@ -49,10 +39,10 @@ function SidebarToggle({ visible }: SidebarToggleProps) {
 export function SidebarChrome() {
   return (
     <div className="sidebar-window-rail">
-      <div className="macos-traffic-light-space" data-tauri-drag-region />
+      <div className="macos-traffic-light-space" data-electron-drag-region />
       <AppMenu />
       <SidebarToggle visible />
-      <div className="window-drag-region" data-tauri-drag-region />
+      <div className="window-drag-region" data-electron-drag-region />
     </div>
   )
 }
@@ -63,25 +53,25 @@ function WindowControls() {
   useEffect(() => {
     if (isMacOS) return
 
-    const appWindow = getCurrentWindow()
+    const appWindow = getNativeApi().window
     let mounted = true
     const updateMaximized = () => {
       void appWindow.isMaximized().then((nextMaximized) => {
         if (mounted) setMaximized(nextMaximized)
       })
     }
-    const unlisten = appWindow.onResized(updateMaximized)
+    const unlisten = appWindow.onMaximizedChange(setMaximized)
     updateMaximized()
 
     return () => {
       mounted = false
-      void unlisten.then((cleanup) => cleanup())
+      unlisten()
     }
   }, [])
 
   if (isMacOS) return null
 
-  const appWindow = getCurrentWindow()
+  const appWindow = getNativeApi().window
   const toggleMaximize = async () => {
     await appWindow.toggleMaximize()
     setMaximized(await appWindow.isMaximized())
@@ -128,7 +118,7 @@ export function DocumentChrome() {
     >
       {!sidebarVisible && (
         <div className="document-rail-leading">
-          <div className="macos-traffic-light-space" data-tauri-drag-region />
+          <div className="macos-traffic-light-space" data-electron-drag-region />
           <AppMenu />
           <SidebarToggle visible={false} />
         </div>
@@ -164,7 +154,22 @@ export function WindowResizeHandles() {
   ) => {
     if (event.button !== 0) return
     event.preventDefault()
-    void getCurrentWindow().startResizeDragging(direction)
+    const nativeWindow = getNativeApi().window
+    nativeWindow.beginResize(direction, event.screenX, event.screenY)
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const updateResize = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      getNativeApi().window.updateResize(event.screenX, event.screenY)
+    }
+  }
+
+  const endResize = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+      getNativeApi().window.endResize()
+    }
   }
 
   return (
@@ -174,6 +179,9 @@ export function WindowResizeHandles() {
           className={`window-resize-handle ${className}`}
           key={direction}
           onPointerDown={(event) => startResize(event, direction)}
+          onPointerMove={updateResize}
+          onPointerUp={endResize}
+          onPointerCancel={endResize}
         />
       ))}
     </div>

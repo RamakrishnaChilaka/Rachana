@@ -8,7 +8,7 @@ Rachana means writing, composition, and creation. Today, the app provides a poli
 
 ## Current capabilities
 
-- Native Tauri desktop shell for Linux and macOS
+- Electron desktop shell with the same Chromium engine on every platform
 - Local folder workspaces with a compact, resizable file tree
 - Lazy-loaded Excalidraw editor with self-hosted handwritten and multilingual fonts
 - Multiple document tabs with explicit saved, saving, conflict, and recovery states
@@ -25,30 +25,19 @@ All drawings remain ordinary files in folders you choose.
 
 ### Prerequisites
 
-- Node.js 24
-- Current stable Rust toolchain
-- Tauri 2 platform dependencies
-
-On Ubuntu or Linux Mint:
-
-```bash
-sudo apt install \
-  pkg-config \
-  libdbus-1-dev \
-  libwebkit2gtk-4.1-dev \
-  libgtk-3-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev
-```
+- Node.js 26
+- npm 11
+- A graphical desktop session for Electron development
 
 ### Run
 
 ```bash
 npm ci
-npm run tauri -- dev
+npm run dev
 ```
 
-A browser-only Vite preview can render the interface, but native file and dialog actions require the Tauri process.
+`npm run dev` starts Electron with Vite-powered renderer hot reload. Native
+filesystem and window behavior runs through the context-isolated preload bridge.
 
 ### Validate
 
@@ -57,12 +46,13 @@ npm run typecheck
 npm run test:run
 npm run test:coverage
 npm run build
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo test --manifest-path src-tauri/Cargo.toml --lib
+npm run test:electron
+npm run package
 ```
 
-Current frontend baseline: 25 test files, 154 tests, 71.13% statement coverage,
-67.06% branch coverage, 79.95% function coverage, and 71.74% line coverage.
+Current baseline: 28 Vitest files, 161 tests, 70.54% statement coverage, 65.61%
+branch coverage, 78.75% function coverage, and 71.39% line coverage, plus one
+Playwright Electron workflow.
 
 ### Canvas performance
 
@@ -75,21 +65,19 @@ view mode with scroll detection disabled. Native file-watcher bursts are
 coalesced into one tree refresh and conflict-reconciliation pass.
 
 Use a production build when comparing responsiveness with excalidraw.com.
-React and Excalidraw development builds intentionally include additional checks,
-and a Linux Tauri window under WSLg uses a different webview and graphics stack
-from a Windows browser.
-
-On Windows, `src-tauri/tauri.windows.conf.json` enables WebView2 pinch zoom so
-Precision Touchpad gestures reach Excalidraw's canvas handler. Trackpad pinch
-changes the drawing zoom, not the saved document or application UI scale.
+React and Excalidraw development builds intentionally include additional checks.
+Electron bundles Chromium on Windows, macOS, and Linux, so rendering and pointer
+gesture behavior use one engine across platforms. Trackpad pinch changes the
+drawing zoom, not the saved document or application UI scale.
 
 ### Build
 
 ```bash
-npm run tauri -- build
+npm run dist
 ```
 
-Artifacts are written beneath `src-tauri/target/release/bundle/`.
+Artifacts are written beneath `release/`. Use `npm run package` for an unpacked
+application suitable for local inspection.
 
 ## Keyboard shortcuts
 
@@ -108,15 +96,15 @@ Artifacts are written beneath `src-tauri/target/release/bundle/`.
 
 ## Architecture
 
-- **Desktop runtime:** Tauri 2 and Rust
+- **Desktop runtime:** Electron 43 and bundled Chromium
 - **Interface:** React 19, TypeScript, and Vite
 - **Canvas engine:** [`@excalidraw/excalidraw`](https://github.com/excalidraw/excalidraw)
 - **State:** Zustand
-- **Filesystem safety:** Rust-owned path validation and atomic writes with expected-content hashes, same-file identity checks, and serialized save transactions
+- **Filesystem safety:** Electron main-process path/content validation, durable staged writes, expected-content hashes, file identity checks, rollback, and serialized save transactions
 - **Recovery:** external modifications and deleted-on-disk drawings remain explicit conflict/recovery tabs instead of being overwritten
 
-Frontend coordination lives in `src/`; native commands, security checks, file
-watching, and durable persistence live in `src-tauri/`. Repository-wide agent
+Frontend coordination lives in `src/`; Electron main/preload code, security
+checks, file watching, and durable persistence live in `electron/`. Repository-wide agent
 rules live in `.github/copilot-instructions.md`, with path-specific guidance in
 `.github/instructions/`.
 

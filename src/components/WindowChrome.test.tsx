@@ -38,10 +38,19 @@ describe('WindowChrome', () => {
     const northEast = container.querySelector('.window-resize-north-east')
 
     expect(northEast).not.toBeNull()
-    fireEvent.pointerDown(northEast!, { button: 0 })
+    fireEvent.pointerDown(northEast!, {
+      button: 0,
+      pointerId: 1,
+      screenX: 400,
+      screenY: 300,
+    })
 
     await waitFor(() => {
-      expect(mockAppWindow.startResizeDragging).toHaveBeenCalledWith('NorthEast')
+      expect(mockAppWindow.beginResize).toHaveBeenCalledWith(
+        'NorthEast',
+        400,
+        300
+      )
     })
   })
 })

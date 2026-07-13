@@ -1,9 +1,9 @@
-import { invoke } from '@tauri-apps/api/core'
 import { promptForName } from './namePrompt'
+import { getNativeApi } from './native'
 import { useStore } from '../store/useStore'
 
 export async function selectWorkspace(): Promise<boolean> {
-  const directory = await invoke<string | null>('select_directory')
+  const directory = await getNativeApi().workspace.selectDirectory()
   if (!directory) {
     return false
   }

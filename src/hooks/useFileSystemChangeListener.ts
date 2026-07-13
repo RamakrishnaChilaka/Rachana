@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import { TIMING } from '../constants'
+import { getNativeApi } from '../lib/native'
 import { pathsEqual } from '../lib/path'
 import { useStore } from '../store/useStore'
 
@@ -56,14 +56,14 @@ export function useFileSystemChangeListener(currentDirectory: string | null) {
       }
     }
 
-    const unlisten = listen('file-system-change', scheduleRefresh)
+    const unlisten = getNativeApi().events.onFileSystemChange(scheduleRefresh)
 
     return () => {
       disposed = true
       if (refreshTimer !== null) {
         window.clearTimeout(refreshTimer)
       }
-      void unlisten.then((fn) => fn())
+      unlisten()
     }
   }, [currentDirectory])
 }

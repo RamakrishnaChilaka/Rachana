@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import './index.css'
-import styles from './index.css?raw'
 
 describe('canvas text typography', () => {
   it('keeps shell font synthesis from changing the Excalidraw text editor weight', () => {
@@ -24,11 +23,5 @@ describe('canvas text typography', () => {
 
     shellInput.remove()
     excalidraw.remove()
-  })
-
-  it('matches the Linux text editor weight to committed canvas text', () => {
-    expect(styles).toMatch(
-      /html\[data-platform='linux'\] \.excalidraw textarea\.excalidraw-wysiwyg\s*\{[^}]*-webkit-font-smoothing:\s*antialiased;[^}]*-webkit-text-stroke:\s*0\.025em currentColor;/,
-    )
   })
 })

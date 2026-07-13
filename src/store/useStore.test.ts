@@ -1,6 +1,5 @@
-import { ask } from '@tauri-apps/plugin-dialog'
 import { describe, expect, it, vi } from 'vitest'
-import { mockInvoke, saveResult } from '../test/setup'
+import { mockAsk as ask, mockInvoke, saveResult } from '../test/setup'
 import {
   DeletionFallbackValidationError,
   DeletionRecoveryError,

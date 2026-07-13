@@ -1,10 +1,9 @@
-import { ask } from '@tauri-apps/plugin-dialog'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getActiveDocumentSaveStatus,
   isPathSaving,
 } from '../lib/saveStatus'
-import { mockInvoke, saveResult } from '../test/setup'
+import { mockAsk as ask, mockInvoke, saveResult } from '../test/setup'
 import type { OpenTab } from '../types'
 import { useStore } from './useStore'
 

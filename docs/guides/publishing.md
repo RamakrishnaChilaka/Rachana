@@ -4,13 +4,14 @@ This guide is for maintainers who publish Rachana builds.
 
 ## GitHub Release
 
-Every pushed `v*` tag, such as `v0.1.0`, triggers `.github/workflows/release.yml`. Its distribution jobs remain skipped unless the repository variable `RACHANA_DISTRIBUTION_ENABLED` is explicitly set to `true`.
+Every pushed `v*` tag, such as `v0.2.0`, triggers `.github/workflows/release.yml`. Its distribution jobs remain skipped unless the repository variable `RACHANA_DISTRIBUTION_ENABLED` is explicitly set to `true`.
 
 The workflow builds:
 
-- Windows x86_64 and ARM64 NSIS (`.exe`) and MSI (`.msi`) installers
+- Windows x86_64 NSIS (`.exe`) and MSI (`.msi`) installers
+- Windows ARM64 NSIS (`.exe`) installer
 - Linux x86_64 AppImage
-- macOS Apple Silicon DMG (`aarch64-apple-darwin`) when `RACHANA_MACOS_RELEASE_ENABLED` is also set to `true`
+- macOS Apple Silicon DMG when `RACHANA_MACOS_RELEASE_ENABLED` is also set to `true`
 
 It then creates a GitHub Release and uploads the available assets.
 
@@ -19,8 +20,8 @@ Publish a GitHub Release:
 ```bash
 git checkout main
 git pull --ff-only origin main
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
 ```
 
 Notes:
@@ -28,15 +29,12 @@ Notes:
 - Windows installers are unsigned and include adjacent SHA-256 checksum files.
   Microsoft Defender SmartScreen may warn until signed releases are configured.
 - Windows builds run natively on `windows-2025` (x86_64) and `windows-11-arm`
-  (ARM64), and fail before compilation if Node or Rust resolves to the wrong
-  architecture.
-- The ARM64 application binary is native. Tauri's ARM64 NSIS setup wrapper is
-  x86 and runs through Windows emulation; the MSI and installed application are
-  labeled by their target architecture.
+  (ARM64), and fail before packaging if Node resolves to the wrong architecture.
+- The ARM64 Electron application and packaged Chromium runtime are native ARM64.
 - macOS builds require macOS 12 or newer and target Apple Silicon only.
 - The macOS workflow produces an explicitly labeled unsigned DMG by default.
 - Set `RACHANA_MACOS_SIGNED_RELEASE_ENABLED` to `true` only after all Apple signing and notarization secrets are configured. Signed releases use a Developer ID certificate and are notarized before upload.
-- Keep `package-lock.json` and `src-tauri/Cargo.lock` committed for reproducible release builds.
+- Keep `package-lock.json` committed for reproducible Electron release builds.
 - If the release workflow changes after a tag is pushed, use a new tag or intentionally move the existing tag after verifying the impact.
 
 Unsigned builds require no Apple credentials. Because macOS Gatekeeper blocks unidentified developers by default, users must Control-click Rachana in Finder, choose **Open**, then confirm **Open** on first launch.
@@ -44,7 +42,6 @@ Unsigned builds require no Apple credentials. Because macOS Gatekeeper blocks un
 Signed and notarized GitHub releases require:
 
 ```text
-APPLE_TEAM_ID
 APPLE_SIGNING_IDENTITY
 DEVELOPER_ID_APPLICATION_CERTIFICATE_BASE64
 DEVELOPER_ID_APPLICATION_CERTIFICATE_PASSWORD
@@ -95,10 +92,15 @@ Run the workflow manually from GitHub Actions:
 1. Open **Actions**.
 2. Select **App Store Release**.
 3. Click **Run workflow**.
-4. Enter the version label, such as `v0.1.0`.
+4. Enter the version label, such as `v0.2.0`.
 
 Notes:
 
-- The Mac App Store build uses `src-tauri/tauri.appstore.conf.json`, `src-tauri/Entitlements.mas.plist.template`, and a generated local `embedded.provisionprofile`.
-- Generated signing/provisioning files are intentionally ignored by git.
+- The Mac App Store build uses `electron-builder.yml`,
+  `build/entitlements.mas.plist`, and
+  `build/entitlements.mas.inherit.plist`. The provisioning profile is decoded
+  into the GitHub runner's temporary directory and passed directly to Electron
+  Builder.
+- Signing certificates, private keys, and provisioning profiles are temporary
+  workflow inputs and are never committed.
 - The app is sandboxed and uses user-selected read/write access. If persistent access to the last opened folder after app restart is required, implement security-scoped bookmarks before relying on automatic folder restore in the store build.

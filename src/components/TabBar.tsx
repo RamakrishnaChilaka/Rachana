@@ -108,7 +108,7 @@ export function TabBar() {
           <Plus aria-hidden="true" />
         </button>
       )}
-      <div className="window-drag-region" data-tauri-drag-region />
+      <div className="window-drag-region" data-electron-drag-region />
       {saveStatus && (
         <div
           className="tab-save-status"

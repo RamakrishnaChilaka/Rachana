@@ -1,7 +1,6 @@
-import { ask } from '@tauri-apps/plugin-dialog'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OpenTab } from '../types'
-import { mockInvoke, saveResult } from '../test/setup'
+import { mockAsk as ask, mockInvoke, saveResult } from '../test/setup'
 import { useStore } from './useStore'
 
 let nextTestTabId = 0
