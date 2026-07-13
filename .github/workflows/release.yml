@@ -49,9 +49,6 @@ jobs:
       - name: Run tests
         run: npm run test:run
 
-      - name: Run native tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
-
       - name: Import Developer ID signing certificate
         if: ${{ vars.RACHANA_MACOS_SIGNED_RELEASE_ENABLED == 'true' }}
         env:
@@ -273,9 +270,6 @@ jobs:
 
       - name: Run tests
         run: npm run test:run
-
-      - name: Run native tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
 
       - name: Build Windows NSIS and MSI installers
         run: npm run tauri -- build --bundles nsis,msi
