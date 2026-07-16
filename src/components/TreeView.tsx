@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Edit2,
   File,
+  FileText,
   FilePlus,
   Folder,
   FolderOpen,
@@ -23,7 +24,7 @@ import {
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { getNativeApi } from '../lib/native'
-import { drawingDisplayName } from '../lib/path'
+import { documentDisplayName } from '../lib/documentKind'
 import { promptForName } from '../lib/namePrompt'
 import {
   DeletionFallbackValidationError,
@@ -57,7 +58,7 @@ interface TreeFocusRecord {
 }
 
 function displayName(node: FileTreeNode): string {
-  return node.is_directory ? node.name : drawingDisplayName(node.name)
+  return node.is_directory ? node.name : documentDisplayName(node.name)
 }
 
 const TreeNode = memo(function TreeNode({
@@ -190,6 +191,18 @@ const TreeNode = memo(function TreeNode({
     onExpansionChange(node.path, true)
   }
 
+  const handleCreateNote = async () => {
+    const fileName = await promptForName({
+      title: 'Note name',
+      defaultValue: 'Untitled.md',
+      confirmLabel: 'Create note',
+    })
+    if (!fileName) return
+
+    await createNewFile(fileName, node.path, 'markdown')
+    onExpansionChange(node.path, true)
+  }
+
   const handleCreateFolder = async () => {
     const folderName = await promptForName({
       title: 'Folder name',
@@ -279,7 +292,9 @@ const TreeNode = memo(function TreeNode({
             ? <FolderOpen className="tree-folder-icon" aria-hidden="true" />
             : <Folder className="tree-folder-icon" aria-hidden="true" />
         ) : (
-          <File className="tree-file-icon" aria-hidden="true" />
+          node.kind === 'markdown'
+            ? <FileText className="tree-file-icon" aria-hidden="true" />
+            : <File className="tree-file-icon" aria-hidden="true" />
         )}
 
         {isRenaming ? (
@@ -317,8 +332,8 @@ const TreeNode = memo(function TreeNode({
           <DropdownMenu.Trigger asChild>
             <button
               className="tree-actions-trigger"
-              aria-label={`${node.is_directory ? 'Folder' : 'Drawing'} actions for ${name}`}
-              title={`${node.is_directory ? 'Folder' : 'Drawing'} actions`}
+              aria-label={`${node.is_directory ? 'Folder' : 'Document'} actions for ${name}`}
+              title={`${node.is_directory ? 'Folder' : 'Document'} actions`}
               onClick={(event) => event.stopPropagation()}
             >
               <MoreHorizontal aria-hidden="true" />
@@ -350,6 +365,15 @@ const TreeNode = memo(function TreeNode({
                   >
                     <FilePlus aria-hidden="true" />
                     New drawing
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="tree-menu-item"
+                    onSelect={() => {
+                      window.setTimeout(() => void handleCreateNote(), 0)
+                    }}
+                  >
+                    <FileText aria-hidden="true" />
+                    New note
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     className="tree-menu-item"

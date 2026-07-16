@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import { isNamePromptOpen, promptForName } from '../lib/namePrompt'
 import { getNativeApi } from '../lib/native'
 import { executeMenuCommand, saveActiveTabAs } from './useMenuHandler'
+import { createMarkdownDocument } from '../lib/workspaceActions'
 
 export function useKeyboardShortcuts() {
   useEffect(() => {
@@ -90,8 +91,14 @@ export function useKeyboardShortcuts() {
         await state.createNewFolder(folderName)
       }
 
+      // Cmd/Ctrl + Alt + N: New Markdown note
+      if (modKey && e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        await createMarkdownDocument()
+      }
+
       // Cmd/Ctrl + N: New file
-      if (modKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
+      if (modKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') {
         e.preventDefault()
 
         // If no directory is selected, select one first

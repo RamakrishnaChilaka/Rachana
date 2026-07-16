@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { OpenTab } from '../types'
+import type { ExcalidrawOpenTab, OpenTab } from '../types'
 import { mockAsk as ask, mockInvoke, saveResult } from '../test/setup'
 import { useStore } from './useStore'
 
@@ -10,9 +10,10 @@ function createTab(
   modified = false,
   elements: readonly any[] = [],
   path = `/drawings/${name}`
-): OpenTab {
+): ExcalidrawOpenTab {
   const content = JSON.stringify({ elements, appState: {}, files: {} })
   return {
+    kind: 'excalidraw',
     tabId: `lifecycle-tab-${++nextTestTabId}`,
     name,
     path,
@@ -21,7 +22,7 @@ function createTab(
     contentHash: `${name}-hash`,
     fileIdentity: `identity:${path}`,
     cachedScene: { elements, appState: {}, files: {} },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 
@@ -95,7 +96,7 @@ describe('external file reconciliation', () => {
       filePath: dirtyTab.path,
     })
     expect(state.openTabs[0].recoveryState).toBe('deleted-on-disk')
-    expect(state.openTabs[0].cachedScene.elements).toEqual(
+    expect(state.openTabs[0].cachedScene!.elements).toEqual(
       JSON.parse(dirtyTab.cachedContent).elements
     )
     expect(state.activeFile?.path).toBe(dirtyTab.path)
@@ -754,6 +755,7 @@ describe('save completion lifecycle guards', () => {
     }
     useStore.setState({
       activeFile: {
+        kind: 'excalidraw',
         tabId: rekeyedTab.tabId,
         name: rekeyedTab.name,
         path: rekeyedTab.path,
@@ -827,7 +829,7 @@ describe('safe switching and recovery persistence', () => {
         path: cleanTab.path,
         contentHash: cleanTab.contentHash,
         fileIdentity: 'replacement-identity',
-        sceneVersion: cleanTab.sceneVersion + 1,
+        contentVersion: cleanTab.contentVersion + 1,
         modified: false,
       })
     )
@@ -903,7 +905,9 @@ describe('safe switching and recovery persistence', () => {
 
     await expect(useStore.getState().saveCurrentFile()).resolves.toBe(true)
 
-    expect(mockInvoke).toHaveBeenCalledWith('select_save_file_path')
+    expect(mockInvoke).toHaveBeenCalledWith('select_save_file_path', {
+      kind: 'excalidraw',
+    })
     expect(mockInvoke).toHaveBeenCalledWith('save_file_as', {
       filePath: destination,
       content: recoveryTab.cachedContent,
@@ -1436,7 +1440,7 @@ describe('guarded workspace switching', () => {
         appState: {},
         files: {},
       }),
-      sceneVersion: cleanTab.sceneVersion + 1,
+      contentVersion: cleanTab.contentVersion + 1,
     }
     let resolveFiles!: (files: unknown[]) => void
     const filesPending = new Promise<unknown[]>((resolve) => {
@@ -1995,7 +1999,7 @@ describe('post-delete clean fallback validation', () => {
     expect(state.activeFile?.path).toBe(fallbackTab.path)
     expect(state.fileContent).toBe(changedContent)
     expect(state.openTabs[0].contentHash).toBe('changed-hash')
-    expect(state.openTabs[0].cachedScene.elements).toEqual([
+    expect(state.openTabs[0].cachedScene!.elements).toEqual([
       { id: 'external-file-change', type: 'diamond' },
     ])
   })
@@ -2053,7 +2057,7 @@ describe('post-delete clean fallback validation', () => {
     expect(state.activeFile?.path).toBe(fallbackTab.path)
     expect(state.fileContent).toBe(changedContent)
     expect(state.openTabs[0].contentHash).toBe('changed-hash')
-    expect(state.openTabs[0].cachedScene.elements).toEqual([
+    expect(state.openTabs[0].cachedScene!.elements).toEqual([
       { id: 'external-folder-change', type: 'ellipse' },
     ])
   })

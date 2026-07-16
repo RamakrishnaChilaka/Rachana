@@ -5,7 +5,11 @@ import {
   DeletionRecoveryError,
   useStore,
 } from './useStore'
-import type { CachedExcalidrawScene, OpenTab } from '../types'
+import type {
+  CachedExcalidrawScene,
+  ExcalidrawOpenTab,
+  OpenTab,
+} from '../types'
 
 let nextTestTabId = 0
 
@@ -13,9 +17,10 @@ function createTab(
   name: string,
   modified = false,
   elements: readonly Record<string, unknown>[] = []
-): OpenTab {
+): ExcalidrawOpenTab {
   const content = JSON.stringify({ elements, appState: {}, files: {} })
   return {
+    kind: 'excalidraw',
     tabId: `store-tab-${++nextTestTabId}`,
     name,
     path: `/drawings/${name}`,
@@ -28,7 +33,7 @@ function createTab(
       appState: {},
       files: {},
     },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 
@@ -221,8 +226,8 @@ describe('tab fallback after deletion', () => {
     expect(state.activeFile?.path).toBe(remainingTab.path)
     expect(state.fileContent).toBe(remainingTab.cachedContent)
     expect(fallbackTab.cachedContent).toBe(remainingTab.cachedContent)
-    expect(fallbackTab.cachedScene.elements).toEqual(latestElements)
-    expect(fallbackTab.sceneVersion).toBe(remainingTab.sceneVersion)
+    expect(fallbackTab.cachedScene!.elements).toEqual(latestElements)
+    expect(fallbackTab.contentVersion).toBe(remainingTab.contentVersion)
     expect(state.isDirty).toBe(true)
   })
 
@@ -398,10 +403,16 @@ describe('tab fallback after deletion', () => {
         path: first.path,
       }
       useStore.setState({
-        files: [{ name: first.name, path: first.path, modified: true }],
+        files: [{
+          name: first.name,
+          path: first.path,
+          kind: 'excalidraw',
+          modified: true,
+        }],
         fileTree: [{
           name: first.name,
           path: first.path,
+          kind: 'excalidraw',
           is_directory: false,
           modified: true,
         }],
@@ -633,7 +644,7 @@ describe('tab fallback after deletion', () => {
       expect(useStore.getState().openTabs[0].cachedContent).toBe(latestTab.cachedContent)
       expect(useStore.getState().openTabs[0].recoveryState).toBe('deleted-on-disk')
       expect(alert).toHaveBeenCalledWith(
-        'The drawing changed while the copy was being saved. The latest changes remain open.'
+        'The document changed while the copy was being saved. The latest changes remain open.'
       )
     })
 
@@ -673,10 +684,11 @@ describe('tab fallback after deletion', () => {
         fileIdentity: 'saved-as-identity',
         recoveryState: undefined,
       })
-      expect(state.openTabs[0].cachedScene.elements).toEqual([
+      expect(state.openTabs[0].cachedScene!.elements).toEqual([
         { id: 'saved-as', type: 'diamond' },
       ])
       expect(state.activeFile).toEqual({
+        kind: 'excalidraw',
         tabId: recoveryTab.tabId,
         name: 'Recovered.excalidraw',
         path: String.raw`C:\Drawings\Recovered.excalidraw`,
@@ -737,7 +749,7 @@ describe('tab fallback after deletion', () => {
     const state = useStore.getState()
     const recoveryTab = state.openTabs.find((tab) => tab.path === changedTarget.path)
     expect(recoveryTab?.recoveryState).toBe('deleted-on-disk')
-    expect(recoveryTab?.cachedScene.elements).toEqual(latestElements)
+    expect(recoveryTab?.cachedScene!.elements).toEqual(latestElements)
     expect(recoveryTab?.modified).toBe(true)
     expect(state.activeFile?.path).toBe(changedTarget.path)
     expect(state.fileContent).toBe(changedTarget.cachedContent)
@@ -807,7 +819,7 @@ describe('tab fallback after deletion', () => {
       fallbackTab.path,
     ])
     expect(state.openTabs[0].recoveryState).toBe('deleted-on-disk')
-    expect(state.openTabs[0].cachedScene.elements).toEqual(latestElements)
+    expect(state.openTabs[0].cachedScene!.elements).toEqual(latestElements)
     expect(state.activeFile?.path).toBe(changedActiveTab.path)
     expect(state.fileContent).toBe(changedActiveTab.cachedContent)
     expect(state.isDirty).toBe(true)

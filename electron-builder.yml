@@ -15,6 +15,13 @@ fileAssociations:
     description: Excalidraw drawing
     mimeType: application/vnd.excalidraw+json
     role: Editor
+  - ext:
+      - md
+      - markdown
+    name: Markdown Document
+    description: Markdown document
+    mimeType: text/markdown
+    role: Editor
 mac:
   category: public.app-category.productivity
   minimumSystemVersion: 12.0

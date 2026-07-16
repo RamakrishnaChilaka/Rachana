@@ -16,7 +16,3 @@ export function normalizePathForComparison(path: string): string {
 export function pathsEqual(first: string, second: string): boolean {
   return normalizePathForComparison(first) === normalizePathForComparison(second)
 }
-
-export function drawingDisplayName(name: string): string {
-  return name.replace(/\.excalidraw$/i, '')
-}

@@ -11,6 +11,7 @@ let nextTestTabId = 0
 
 function createTab(path: string, modified = false): OpenTab {
   return {
+    kind: 'excalidraw',
     tabId: `tab-lifecycle-tab-${++nextTestTabId}`,
     name: path.split('/').pop() || path,
     path,
@@ -18,7 +19,7 @@ function createTab(path: string, modified = false): OpenTab {
     cachedContent: '{"elements":[]}',
     contentHash: path,
     cachedScene: { elements: [], appState: {}, files: {} },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 

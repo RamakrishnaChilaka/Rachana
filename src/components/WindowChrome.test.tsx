@@ -24,7 +24,7 @@ describe('WindowChrome', () => {
 
     expect(screen.getByRole('banner', { name: 'Open documents' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Open application menu' })).toBeVisible()
-    expect(screen.getByRole('button', { name: 'New drawing' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'New document' })).toBeVisible()
 
     await user.click(screen.getByRole('button', { name: 'Show sidebar' }))
     expect(useStore.getState().sidebarVisible).toBe(true)

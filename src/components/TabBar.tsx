@@ -2,9 +2,9 @@ import { useRef, type KeyboardEvent } from 'react'
 import { Plus, X } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import { cn } from '../lib/utils'
-import { drawingDisplayName } from '../lib/path'
+import { documentDisplayName } from '../lib/documentKind'
 import { getActiveDocumentSaveStatus } from '../lib/saveStatus'
-import { createDrawing } from '../lib/workspaceActions'
+import { NewDocumentMenu } from './NewDocumentMenu'
 
 export function TabBar() {
   const openTabs = useStore((state) => state.openTabs)
@@ -55,7 +55,7 @@ export function TabBar() {
           const isActive = activeFile?.tabId
             ? activeFile.tabId === tab.tabId
             : activeFile?.path === tab.path
-          const name = drawingDisplayName(tab.name)
+          const name = documentDisplayName(tab.name)
           const isRecoveryCopy = tab.recoveryState === 'deleted-on-disk'
           const hasExternalConflict = tab.externalConflict === 'modified-on-disk'
 
@@ -99,14 +99,9 @@ export function TabBar() {
         })}
       </div>
       {!presentationMode && (
-        <button
-          className="new-tab-button"
-          aria-label="New drawing"
-          title="New drawing (Ctrl+N)"
-          onClick={() => void createDrawing()}
-        >
+        <NewDocumentMenu className="new-tab-button">
           <Plus aria-hidden="true" />
-        </button>
+        </NewDocumentMenu>
       )}
       <div className="window-drag-region" data-electron-drag-region />
       {saveStatus && (

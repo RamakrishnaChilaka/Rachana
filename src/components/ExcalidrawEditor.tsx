@@ -11,13 +11,17 @@ import {
 import { useStore } from '../store/useStore'
 import { registerEditorExcalidrawAPI } from '../hooks/useMenuHandler'
 import { TIMING } from '../constants'
-import type { OpenTab } from '../types'
+import type { ExcalidrawOpenTab } from '../types'
 import { FilePlus2, FolderOpen, LockKeyhole } from 'lucide-react'
-import { createDrawing, selectWorkspace } from '../lib/workspaceActions'
+import {
+  createDrawing,
+  createMarkdownDocument,
+  selectWorkspace,
+} from '../lib/workspaceActions'
 import { didSceneElementsChange } from '../lib/sceneElements'
 import {
-  registerEditorSceneFlusher,
-} from '../lib/editorSceneSync'
+  registerEditorContentFlusher,
+} from '../lib/editorContentSync'
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types'
 import type {
   AppState as ExcalidrawAppState,
@@ -37,7 +41,7 @@ interface PendingScene {
 }
 
 interface EditorPaneProps {
-  tab: OpenTab
+  tab: ExcalidrawOpenTab
   isActive: boolean
   presentationMode: boolean
   theme: 'light' | 'dark'
@@ -73,7 +77,7 @@ const EditorPane = memo(function EditorPane({
   const contentSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingSceneRef = useRef<PendingScene | null>(null)
 
-  // The sceneVersion key remounts this pane; initialData stays stable until then.
+  // The contentVersion key remounts this pane; initialData stays stable until then.
   const initialData = useMemo(() => ({
     elements: tab.cachedScene.elements,
     appState: tab.cachedScene.appState,
@@ -149,11 +153,11 @@ const EditorPane = memo(function EditorPane({
 
     useStore.getState().updateTabContent(
       tab.tabId,
-      tab.sceneVersion,
+      tab.contentVersion,
       content,
       scene
     )
-  }, [tab.sceneVersion, tab.tabId])
+  }, [tab.contentVersion, tab.tabId])
 
   const scheduleContentSync = useCallback(() => {
     if (contentSyncTimerRef.current) {
@@ -221,7 +225,7 @@ const EditorPane = memo(function EditorPane({
   }, [flushPendingScene, isActive])
 
   useEffect(() => {
-    const unregister = registerEditorSceneFlusher(tab.tabId, flushPendingScene)
+    const unregister = registerEditorContentFlusher(tab.tabId, flushPendingScene)
     return () => {
       flushPendingScene()
       unregister()
@@ -308,7 +312,7 @@ const EditorPane = memo(function EditorPane({
   previous.tab.tabId === current.tab.tabId &&
   previous.tab.path === current.tab.path &&
   previous.tab.name === current.tab.name &&
-  previous.tab.sceneVersion === current.tab.sceneVersion &&
+  previous.tab.contentVersion === current.tab.contentVersion &&
   previous.isActive === current.isActive &&
   previous.presentationMode === current.presentationMode &&
   previous.theme === current.theme
@@ -324,10 +328,13 @@ export function ExcalidrawEditor({ theme }: ExcalidrawEditorProps) {
   const presentationMode = useStore(state => state.presentationMode)
   const currentDirectory = useStore(state => state.currentDirectory)
   const fileTree = useStore(state => state.fileTree)
+  const drawingTabs = openTabs.filter(
+    (tab): tab is ExcalidrawOpenTab => tab.kind === 'excalidraw'
+  )
 
   if (!activeFile) {
     const hasWorkspace = Boolean(currentDirectory)
-    const hasDrawings = fileTree.length > 0
+    const hasDocuments = fileTree.length > 0
 
     return (
       <main className="editor-region editor-empty">
@@ -338,16 +345,16 @@ export function ExcalidrawEditor({ theme }: ExcalidrawEditorProps) {
           <h1>
             {!hasWorkspace
               ? 'Open a folder to begin'
-              : hasDrawings
-                ? 'Choose a drawing'
-                : 'Create your first drawing'}
+              : hasDocuments
+                ? 'Choose a document'
+                : 'Create your first document'}
           </h1>
           <p>
             {!hasWorkspace
               ? 'Use any local folder as your drawing workspace.'
-              : hasDrawings
-                ? 'Select a drawing in the workspace sidebar, or start a new one.'
-                : 'This workspace is ready for its first Excalidraw file.'}
+              : hasDocuments
+                ? 'Select a drawing or note in the workspace sidebar.'
+                : 'Start with an Excalidraw canvas or Markdown note.'}
           </p>
           <div className="empty-state-actions">
             <button
@@ -359,10 +366,20 @@ export function ExcalidrawEditor({ theme }: ExcalidrawEditorProps) {
             </button>
             <button
               className="empty-secondary-action"
-              onClick={() => void (hasWorkspace ? selectWorkspace() : createDrawing())}
+              onClick={() => void (
+                hasWorkspace ? createMarkdownDocument() : createDrawing()
+              )}
             >
-              {hasWorkspace ? 'Open another folder' : 'Create a drawing'}
+              {hasWorkspace ? 'New note' : 'Create a drawing'}
             </button>
+            {hasWorkspace && (
+              <button
+                className="empty-secondary-action"
+                onClick={() => void selectWorkspace()}
+              >
+                Open another folder
+              </button>
+            )}
           </div>
           <div className="local-reassurance">
             <LockKeyhole aria-hidden="true" />
@@ -375,14 +392,14 @@ export function ExcalidrawEditor({ theme }: ExcalidrawEditorProps) {
 
   return (
     <main className="editor-region">
-      {openTabs.map((tab) => {
+      {drawingTabs.map((tab) => {
         const isActive = activeFile.tabId
           ? activeFile.tabId === tab.tabId
           : activeFile.path === tab.path
 
         return (
           <EditorPane
-            key={`${tab.tabId}:${tab.sceneVersion}`}
+            key={`${tab.tabId}:${tab.contentVersion}`}
             tab={tab}
             isActive={isActive}
             presentationMode={presentationMode}

@@ -1,7 +1,7 @@
 # Rachana Repository Instructions
 
 Rachana is a production local-first Electron application for ordinary
-`.excalidraw` files. It has no account, cloud backend, or browser filesystem
+`.excalidraw`, `.md`, and `.markdown` files. It has no account, cloud backend, or browser filesystem
 fallback. Preserve file integrity, explicit save state, conflict detection, and
 recovery behavior before convenience.
 
@@ -14,8 +14,10 @@ recovery behavior before convenience.
   bridge. The renderer never imports Node or Electron.
 - `src/store/useStore.ts` coordinates tabs, save transactions, external changes,
   conflicts, recovery, deletion, and workspace mutation.
-- `src/components/ExcalidrawEditor.tsx` owns canvas lifecycle and scene buffering;
-  `src/lib/editorSceneSync.ts` owns synchronous flush registration.
+- `src/components/ExcalidrawEditor.tsx` owns canvas lifecycle and scene buffering.
+- `src/components/MarkdownEditor.tsx` owns mounted CodeMirror instances,
+  buffered text, modes, and safe GFM preview.
+- `src/lib/editorContentSync.ts` owns synchronous per-tab flush registration.
 - `src/hooks/useFileSystemChangeListener.ts` owns renderer watcher coalescing.
 - `src/lib/tabLifecycle.ts`, `saveStatus.ts`, and `path.ts` own their respective
   derived rules. Extend these owners instead of duplicating logic.
@@ -24,7 +26,7 @@ recovery behavior before convenience.
 
 - Identify tab instances by `tabId`, never path. Paths may be reused by recovery
   and conflict workflows.
-- Keep cached content/scene, active content, hashes, identity, scene version, and
+- Keep document kind, cached content/scene, active content, hashes, identity, content version, and
   lifecycle version coherent. Re-read Zustand state after every `await` before
   committing work.
 - Preserve renderer write queues, Save As claims, main-process path queues,
@@ -43,17 +45,21 @@ recovery behavior before convenience.
   Node globals, or Electron objects to the renderer.
 - Keep close handling as a main-request/renderer-veto handshake.
 
-## Canvas Performance
+## Editor Performance
 
 - Keep Excalidraw lazy-loaded and full-scene serialization out of pointer hot
   paths. Buffer newest scene data and serialize after editor idle.
-- Flush pending scenes before persistence and lifecycle boundaries. Target writes
-  by `tabId` and reject stale `sceneVersion` writes.
+- Flush pending editor content before persistence and lifecycle boundaries.
+  Target writes by `tabId` and reject stale `contentVersion` writes.
 - The first restored callback establishes the clean baseline. Restoration and
   viewport-only callbacks never mark a drawing dirty.
 - Keep inactive editors mounted for undo history, hidden with `display: none`, in
   view mode, with scroll detection disabled. Do not use React `Activity`.
 - Resolve menu canvas APIs by active `tabId` with identity-safe cleanup.
+- Keep CodeMirror lazy-loaded until a Markdown tab opens, then keep each note
+  mounted for undo history. Defer preview parsing with React deferred values.
+- Treat Markdown as raw text. Do not round-trip through HTML, enable raw HTML in
+  preview, or bypass native kind-preserving Save As/rename validation.
 
 ## Working Rules
 
@@ -62,6 +68,11 @@ recovery behavior before convenience.
   stale or concurrent paths.
 - Keep edits narrow and use established Radix, Lucide, Zustand, Electron, and
   accessibility patterns.
+- Keep renderer menu commands grouped and document-aware. Disable persistence
+  actions without an active document and canvas actions outside Excalidraw;
+  bound portal menus to Radix's measured available height.
+- Generic plus or New controls must open the shared document-kind chooser;
+  never make an unlabeled generic creation affordance default to Excalidraw.
 - Never commit, push, tag, publish, upload, sign, notarize, or create a release
   unless explicitly requested. Never print secrets.
 
@@ -82,6 +93,6 @@ Update `README.md`, this file, and
 `.github/instructions/testing.instructions.md` together when final test counts or
 coverage change. `CLAUDE.md` is only a pointer to this canonical guidance.
 
-Current baseline: 28 Vitest files, 161 tests, 70.54% statement coverage, 65.61%
-branch coverage, 78.75% function coverage, and 71.39% line coverage, plus one
+Current baseline: 31 Vitest files, 190 tests, 71.38% statement coverage, 65.96%
+branch coverage, 79.96% function coverage, and 72.29% line coverage, plus one
 Playwright Electron workflow.

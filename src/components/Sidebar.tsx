@@ -25,6 +25,7 @@ import {
   selectWorkspace,
 } from '../lib/workspaceActions'
 import { SidebarChrome } from './WindowChrome'
+import { NewDocumentMenu } from './NewDocumentMenu'
 
 interface IconActionProps {
   label: string
@@ -236,24 +237,10 @@ export function Sidebar() {
           </div>
 
           <div className="sidebar-actions" aria-label="Workspace actions">
-            <Tooltip.Root>
-              <Tooltip.Trigger asChild>
-                <button
-                  className="sidebar-primary-action"
-                  onClick={() => void createDrawing()}
-                  aria-label="New drawing"
-                >
-                  <Plus aria-hidden="true" />
-                  <span className="sidebar-primary-action-label">New drawing</span>
-                </button>
-              </Tooltip.Trigger>
-              <Tooltip.Portal>
-                <Tooltip.Content className="app-tooltip" side="bottom" sideOffset={6}>
-                  New drawing
-                  <Tooltip.Arrow className="app-tooltip-arrow" />
-                </Tooltip.Content>
-              </Tooltip.Portal>
-            </Tooltip.Root>
+            <NewDocumentMenu className="sidebar-primary-action">
+              <Plus aria-hidden="true" />
+              <span className="sidebar-primary-action-label">New</span>
+            </NewDocumentMenu>
             <IconAction label="Open folder" onClick={() => void selectWorkspace()}>
               <FolderOpen aria-hidden="true" />
             </IconAction>
@@ -307,7 +294,7 @@ export function Sidebar() {
           <div className="sidebar-tree">
             {fileTree.length === 0 ? (
               <div className="sidebar-empty">
-                <p>{currentDirectory ? 'No drawings yet' : 'Open a folder to browse drawings'}</p>
+                <p>{currentDirectory ? 'No documents yet' : 'Open a folder to browse documents'}</p>
                 {currentDirectory && (
                   <button onClick={() => void createDrawing()}>Create a drawing</button>
                 )}

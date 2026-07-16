@@ -1,11 +1,11 @@
 import { act, render, waitFor } from '@testing-library/react'
 import { useEffect } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { OpenTab } from '../types'
+import type { ExcalidrawOpenTab } from '../types'
 import type { CachedExcalidrawScene } from '../types'
 import { useStore } from '../store/useStore'
 import { ExcalidrawEditor } from './ExcalidrawEditor'
-import { flushPendingEditorScene } from '../lib/editorSceneSync'
+import { flushPendingEditorContent } from '../lib/editorContentSync'
 import { executeMenuCommand } from '../hooks/useMenuHandler'
 
 const excalidrawHarness = vi.hoisted(() => ({
@@ -58,7 +58,9 @@ vi.mock('@excalidraw/excalidraw', () => ({
   },
 }))
 
-function createTab(elements: readonly Record<string, unknown>[] = []): OpenTab {
+function createTab(
+  elements: readonly Record<string, unknown>[] = []
+): ExcalidrawOpenTab {
   const cachedContent = JSON.stringify({
     type: 'excalidraw',
     version: 2,
@@ -67,6 +69,7 @@ function createTab(elements: readonly Record<string, unknown>[] = []): OpenTab {
     files: {},
   })
   return {
+    kind: 'excalidraw',
     tabId: 'editor-performance-tab',
     name: 'Performance.excalidraw',
     path: '/drawings/Performance.excalidraw',
@@ -79,7 +82,7 @@ function createTab(elements: readonly Record<string, unknown>[] = []): OpenTab {
       appState: {},
       files: {},
     },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 
@@ -94,7 +97,7 @@ describe('ExcalidrawEditor canvas updates', () => {
     excalidrawHarness.effectMounts = 0
     excalidrawHarness.effectCleanups = 0
     const firstTab = createTab([{ id: 'editor-first' }])
-    const secondTab: OpenTab = {
+    const secondTab: ExcalidrawOpenTab = {
       ...createTab([{ id: 'editor-second' }]),
       tabId: 'editor-performance-tab-2',
       name: 'Performance 2.excalidraw',
@@ -219,12 +222,12 @@ describe('ExcalidrawEditor canvas updates', () => {
     expect(excalidrawHarness.renderCount).toBe(readyRenderCount)
 
     act(() => {
-      flushPendingEditorScene(tab.tabId)
+      flushPendingEditorContent(tab.tabId)
     })
 
     expect(JSON.parse(useStore.getState().fileContent ?? '{}').elements)
       .toEqual(changedElements)
-    expect(useStore.getState().openTabs[0].cachedScene.elements)
+    expect(useStore.getState().openTabs[0].cachedScene!.elements)
       .toEqual(changedElements)
     expect(excalidrawHarness.renderCount).toBe(readyRenderCount)
   })
@@ -341,7 +344,7 @@ describe('ExcalidrawEditor canvas updates', () => {
       appState: {},
       files: {},
     })
-    const reloadedTab: OpenTab = {
+    const reloadedTab: ExcalidrawOpenTab = {
       ...tab,
       cachedContent: reloadedContent,
       cachedScene: {
@@ -351,7 +354,7 @@ describe('ExcalidrawEditor canvas updates', () => {
         appState: {},
         files: {},
       },
-      sceneVersion: tab.sceneVersion + 1,
+      contentVersion: tab.contentVersion + 1,
     }
 
     act(() => {
@@ -361,11 +364,11 @@ describe('ExcalidrawEditor canvas updates', () => {
         isDirty: false,
         openTabs: [reloadedTab],
       })
-      flushPendingEditorScene(tab.tabId)
+      flushPendingEditorContent(tab.tabId)
     })
 
     expect(useStore.getState().fileContent).toBe(reloadedContent)
-    expect(useStore.getState().openTabs[0].cachedScene.elements)
+    expect(useStore.getState().openTabs[0].cachedScene!.elements)
       .toEqual([{ id: 'disk-element', version: 1 }])
   })
 })

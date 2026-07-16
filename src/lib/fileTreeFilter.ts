@@ -1,5 +1,5 @@
 import type { FileTreeNode } from '../types'
-import { drawingDisplayName } from './path'
+import { documentDisplayName } from './documentKind'
 
 interface FileTreeFilterResult {
   nodes: FileTreeNode[]
@@ -7,7 +7,7 @@ interface FileTreeFilterResult {
 }
 
 function displayedNodeName(node: FileTreeNode): string {
-  return node.is_directory ? node.name : drawingDisplayName(node.name)
+  return node.is_directory ? node.name : documentDisplayName(node.name)
 }
 
 function countMatches(nodes: FileTreeNode[], query: string): number {

@@ -72,8 +72,8 @@ const mockNativeApi: RachanaNativeApi = {
         isDirectory,
         candidatePaths,
       }),
-    createFile: (directory, fileName) =>
-      mockInvoke('create_new_file', { directory, fileName }),
+    createFile: (directory, fileName, kind) =>
+      mockInvoke('create_new_file', { directory, fileName, kind }),
     createFolder: (directory, folderName) =>
       mockInvoke('create_new_folder', { directory, folderName }),
     renameFile: (oldPath, newName) =>
@@ -95,7 +95,7 @@ const mockNativeApi: RachanaNativeApi = {
         expectedIdentity: request.expectedIdentity,
       })
     ),
-    selectSavePath: () => mockInvoke('select_save_file_path'),
+    selectSavePath: (kind) => mockInvoke('select_save_file_path', { kind }),
     saveAs: async (request) => normalizeSaveResult(
       await mockInvoke('save_file_as', {
         filePath: request.filePath,

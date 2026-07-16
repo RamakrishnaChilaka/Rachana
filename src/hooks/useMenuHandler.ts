@@ -4,6 +4,7 @@ import { getNativeApi, type MenuCommand } from '../lib/native'
 import { isNamePromptOpen } from '../lib/namePrompt'
 import {
   createDrawing,
+  createMarkdownDocument,
   createWorkspaceFolder,
   selectWorkspace,
 } from '../lib/workspaceActions'
@@ -122,6 +123,7 @@ function showKeyboardShortcuts() {
 File
   Open folder: Cmd/Ctrl+O
   New drawing: Cmd/Ctrl+N
+  New note: Cmd/Ctrl+Alt+N
   New folder: Cmd/Ctrl+Shift+N
   Save: Cmd/Ctrl+S
   Save As: Cmd/Ctrl+Shift+S
@@ -151,6 +153,9 @@ export async function executeMenuCommand({
       return
     case 'new_file':
       await createDrawing()
+      return
+    case 'new_note':
+      await createMarkdownDocument()
       return
     case 'new_folder':
       await createWorkspaceFolder()

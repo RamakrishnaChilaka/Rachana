@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  flushPendingEditorScene,
-  registerEditorSceneFlusher,
-} from './editorSceneSync'
+  flushPendingEditorContent,
+  registerEditorContentFlusher,
+} from './editorContentSync'
 
-describe('editor scene synchronization', () => {
+describe('editor content synchronization', () => {
   it('flushes a registered tab until it is unregistered', () => {
     const flusher = vi.fn()
-    const unregister = registerEditorSceneFlusher('tab-1', flusher)
+    const unregister = registerEditorContentFlusher('tab-1', flusher)
 
-    flushPendingEditorScene('tab-1')
+    flushPendingEditorContent('tab-1')
     unregister()
-    flushPendingEditorScene('tab-1')
+    flushPendingEditorContent('tab-1')
 
     expect(flusher).toHaveBeenCalledTimes(1)
   })
@@ -19,17 +19,17 @@ describe('editor scene synchronization', () => {
   it('keeps a newer flusher when an older editor unregisters', () => {
     const olderFlusher = vi.fn()
     const newerFlusher = vi.fn()
-    const unregisterOlder = registerEditorSceneFlusher(
+    const unregisterOlder = registerEditorContentFlusher(
       'shared-tab',
       olderFlusher
     )
-    const unregisterNewer = registerEditorSceneFlusher(
+    const unregisterNewer = registerEditorContentFlusher(
       'shared-tab',
       newerFlusher
     )
 
     unregisterOlder()
-    flushPendingEditorScene('shared-tab')
+    flushPendingEditorContent('shared-tab')
     unregisterNewer()
 
     expect(olderFlusher).not.toHaveBeenCalled()
@@ -39,16 +39,16 @@ describe('editor scene synchronization', () => {
   it('flushes all mounted editors at a lifecycle boundary', () => {
     const firstFlusher = vi.fn()
     const secondFlusher = vi.fn()
-    const unregisterFirst = registerEditorSceneFlusher(
+    const unregisterFirst = registerEditorContentFlusher(
       'all-tab-1',
       firstFlusher
     )
-    const unregisterSecond = registerEditorSceneFlusher(
+    const unregisterSecond = registerEditorContentFlusher(
       'all-tab-2',
       secondFlusher
     )
 
-    flushPendingEditorScene()
+    flushPendingEditorContent()
     unregisterFirst()
     unregisterSecond()
 

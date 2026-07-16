@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  drawingDisplayName,
   normalizePathForComparison,
   pathBasename,
   pathsEqual,
@@ -36,12 +35,5 @@ describe('cross-platform path identity', () => {
 
   it('preserves case sensitivity for POSIX paths', () => {
     expect(pathsEqual('/drawings/Plan.excalidraw', '/drawings/plan.excalidraw')).toBe(false)
-  })
-})
-
-describe('drawingDisplayName', () => {
-  it('removes only a trailing Excalidraw extension', () => {
-    expect(drawingDisplayName('Roadmap.excalidraw')).toBe('Roadmap')
-    expect(drawingDisplayName('Roadmap.excalidraw.backup')).toBe('Roadmap.excalidraw.backup')
   })
 })

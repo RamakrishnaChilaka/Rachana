@@ -1,9 +1,35 @@
 import { act, render, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FileTreeNode } from '../types'
 import { useStore } from '../store/useStore'
 import { Sidebar } from './Sidebar'
+
+const {
+  createDrawing,
+  createMarkdownDocument,
+  createWorkspaceFolder,
+  selectWorkspace,
+} = vi.hoisted(() => ({
+  createDrawing: vi.fn(),
+  createMarkdownDocument: vi.fn(),
+  createWorkspaceFolder: vi.fn(),
+  selectWorkspace: vi.fn(),
+}))
+
+vi.mock('../lib/workspaceActions', () => ({
+  createDrawing,
+  createMarkdownDocument,
+  createWorkspaceFolder,
+  selectWorkspace,
+}))
+
+beforeEach(() => {
+  createDrawing.mockReset()
+  createMarkdownDocument.mockReset()
+  createWorkspaceFolder.mockReset()
+  selectWorkspace.mockReset()
+})
 
 const searchableTree: FileTreeNode[] = [
   {
@@ -54,15 +80,30 @@ describe('Sidebar workspace actions', () => {
 
     const { getByLabelText, getByRole } = render(<Sidebar />)
     const sidebar = getByLabelText('Workspace explorer')
-    const newDrawing = getByRole('button', { name: 'New drawing' })
+    const newDocument = getByRole('button', { name: 'New document' })
 
     expect(sidebar).toHaveClass('sidebar-panel')
     expect(sidebar).toHaveStyle({ width: '200px' })
-    expect(newDrawing).toHaveClass('sidebar-primary-action')
-    expect(newDrawing).toHaveAttribute('aria-label', 'New drawing')
-    expect(within(newDrawing).getByText('New drawing')).toHaveClass(
+    expect(newDocument).toHaveClass('sidebar-primary-action')
+    expect(newDocument).toHaveAttribute('aria-label', 'New document')
+    expect(within(newDocument).getByText('New')).toHaveClass(
       'sidebar-primary-action-label'
     )
+  })
+
+  it('creates drawings and notes from the shared primary action', async () => {
+    const user = userEvent.setup()
+    setSidebarState(searchableTree)
+    const { getByRole } = render(<Sidebar />)
+    const trigger = getByRole('button', { name: 'New document' })
+
+    await user.click(trigger)
+    await user.click(getByRole('menuitem', { name: 'New drawing' }))
+    expect(createDrawing).toHaveBeenCalledOnce()
+
+    await user.click(trigger)
+    await user.click(getByRole('menuitem', { name: 'New note' }))
+    expect(createMarkdownDocument).toHaveBeenCalledOnce()
   })
 
   it('reveals and focuses an ancestor-preserving file filter', async () => {
@@ -179,13 +220,13 @@ describe('Sidebar workspace actions', () => {
     await user.click(getByRole('button', { name: 'Search workspace files' }))
     await user.type(getByLabelText('Filter workspace files'), 'launch')
     getByTitle('Launch Plan.excalidraw').focus()
-    const newDrawing = getByRole('button', { name: 'New drawing' })
-    newDrawing.focus()
+    const newDocument = getByRole('button', { name: 'New document' })
+    newDocument.focus()
 
     act(() => {
       setSidebarState([])
     })
 
-    expect(newDrawing).toHaveFocus()
+    expect(newDocument).toHaveFocus()
   })
 })

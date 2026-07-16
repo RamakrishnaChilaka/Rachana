@@ -1,4 +1,4 @@
-import type { ExcalidrawFile, OpenTab } from '../types'
+import type { DocumentFile, OpenTab } from '../types'
 
 export type SaveOperations = Record<string, string>
 export type DocumentSaveStatus =
@@ -32,7 +32,7 @@ export function rekeySaveOperation(
 }
 
 export function getActiveDocumentSaveStatus(
-  activeFile: ExcalidrawFile | null,
+  activeFile: DocumentFile | null,
   openTabs: OpenTab[],
   isDirty: boolean,
   saveOperations: SaveOperations

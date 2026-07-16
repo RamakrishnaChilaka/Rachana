@@ -1,16 +1,41 @@
-import { act, render } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OpenTab } from '../types'
 import { useStore } from '../store/useStore'
 import { TabBar } from './TabBar'
 
+const { createDrawing, createMarkdownDocument } = vi.hoisted(() => ({
+  createDrawing: vi.fn(),
+  createMarkdownDocument: vi.fn(),
+}))
+
+vi.mock('../lib/workspaceActions', () => ({
+  createDrawing,
+  createMarkdownDocument,
+}))
+
 let nextTestTabId = 0
+
+beforeEach(() => {
+  createDrawing.mockReset()
+  createMarkdownDocument.mockReset()
+  useStore.setState({
+    activeFile: null,
+    fileContent: null,
+    isDirty: false,
+    openTabs: [],
+    presentationMode: false,
+    saveOperations: {},
+  })
+})
 
 function createTab(
   modified = false,
   recoveryState?: OpenTab['recoveryState']
 ): OpenTab {
   return {
+    kind: 'excalidraw',
     tabId: `tab-bar-tab-${++nextTestTabId}`,
     name: 'Plan.excalidraw',
     path: '/drawings/Plan.excalidraw',
@@ -19,7 +44,7 @@ function createTab(
     cachedContent: '{}',
     contentHash: 'hash',
     cachedScene: { elements: [], appState: {}, files: {} },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 
@@ -83,5 +108,39 @@ describe('TabBar save status', () => {
       })
     })
     expect(queryByRole('status', { name: 'Document save status' })).toBeNull()
+  })
+})
+
+describe('TabBar document creation', () => {
+  it('offers both document kinds from one generic trigger', async () => {
+    const user = userEvent.setup()
+    render(<TabBar />)
+
+    const trigger = screen.getByRole('button', { name: 'New document' })
+    expect(screen.queryByRole('button', { name: 'New drawing' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'New note' })).toBeNull()
+
+    await user.click(trigger)
+    await user.click(screen.getByRole('menuitem', { name: 'New drawing' }))
+    expect(createDrawing).toHaveBeenCalledOnce()
+    expect(createMarkdownDocument).not.toHaveBeenCalled()
+
+    await user.click(trigger)
+    await user.click(screen.getByRole('menuitem', { name: 'New note' }))
+    expect(createMarkdownDocument).toHaveBeenCalledOnce()
+  })
+
+  it('supports keyboard creation and hides the trigger in presentation mode', async () => {
+    const user = userEvent.setup()
+    const { rerender } = render(<TabBar />)
+    const trigger = screen.getByRole('button', { name: 'New document' })
+
+    trigger.focus()
+    await user.keyboard('{Enter}{ArrowDown}{Enter}')
+    expect(createMarkdownDocument).toHaveBeenCalledOnce()
+
+    act(() => useStore.setState({ presentationMode: true }))
+    rerender(<TabBar />)
+    expect(screen.queryByRole('button', { name: 'New document' })).toBeNull()
   })
 })

@@ -1,7 +1,18 @@
 import { create } from 'zustand'
-import { CachedExcalidrawScene, ExcalidrawFile, FileTreeNode, OpenTab, Preferences } from '../types'
+import {
+  CachedExcalidrawScene,
+  DocumentFile,
+  FileTreeNode,
+  OpenTab,
+  Preferences,
+} from '../types'
 import { clampSidebarWidth, DEFAULT_SIDEBAR_WIDTH } from '../lib/layout'
 import { getNativeApi, type NativeFileContent } from '../lib/native'
+import {
+  documentKindFromPath,
+  ensureDocumentExtension,
+  type DocumentKind,
+} from '../lib/documentKind'
 import {
   normalizePathForComparison,
   pathBasename,
@@ -12,7 +23,7 @@ import {
   rekeySaveOperation,
   type SaveOperations,
 } from '../lib/saveStatus'
-import { flushPendingEditorScene } from '../lib/editorSceneSync'
+import { flushPendingEditorContent } from '../lib/editorContentSync'
 
 type UnsavedChangesDecision = 'save' | 'discard' | 'cancel'
 type FileLoadSource = 'cache' | 'disk' | null
@@ -139,34 +150,41 @@ function parseSceneFromContent(content: string): CachedExcalidrawScene {
 }
 
 function toOpenTab(
-  file: ExcalidrawFile,
+  file: DocumentFile,
   content: string,
   contentHash: string,
   fileIdentity: string,
-  sceneVersion = 0
+  contentVersion = 0
 ): OpenTab {
-  return {
+  const baseTab = {
     ...file,
     tabId: file.tabId ?? `tab-${++nextTabInstanceId}`,
     cachedContent: content,
     contentHash,
     fileIdentity,
-    cachedScene: parseSceneFromContent(content),
-    sceneVersion,
+    contentVersion,
     lifecycleVersion: 0,
   }
+  return file.kind === 'markdown'
+    ? { ...baseTab, kind: 'markdown' }
+    : {
+        ...baseTab,
+        kind: 'excalidraw',
+        cachedScene: parseSceneFromContent(content),
+      }
 }
 
-function toExcalidrawFile(tab: OpenTab): ExcalidrawFile {
+function toDocumentFile(tab: OpenTab): DocumentFile {
   return {
     name: tab.name,
     path: tab.path,
+    kind: tab.kind,
     modified: tab.modified,
     tabId: tab.tabId,
   }
 }
 
-async function readOpenTabFromDisk(file: ExcalidrawFile, sceneVersion = 0): Promise<OpenTab> {
+async function readOpenTabFromDisk(file: DocumentFile, contentVersion = 0): Promise<OpenTab> {
   const { content, contentHash, fileIdentity } =
     await getNativeApi().files.read(file.path)
 
@@ -175,7 +193,7 @@ async function readOpenTabFromDisk(file: ExcalidrawFile, sceneVersion = 0): Prom
     content,
     contentHash,
     fileIdentity,
-    sceneVersion
+    contentVersion
   )
 }
 
@@ -185,6 +203,9 @@ interface PreparedFallbackTab {
 }
 
 function synchronizeTabScene(tab: OpenTab): OpenTab {
+  if (tab.kind === 'markdown') {
+    return tab
+  }
   return {
     ...tab,
     cachedScene: parseSceneFromContent(tab.cachedContent),
@@ -202,7 +223,7 @@ function hasSameTabSnapshot(current: OpenTab, snapshot: OpenTab): boolean {
     current.contentHash === snapshot.contentHash &&
     current.fileIdentity === snapshot.fileIdentity &&
     current.modified === snapshot.modified &&
-    current.sceneVersion === snapshot.sceneVersion &&
+    current.contentVersion === snapshot.contentVersion &&
     current.recoveryState === snapshot.recoveryState &&
     current.externalConflict === snapshot.externalConflict &&
     (current.lifecycleVersion ?? 0) === (snapshot.lifecycleVersion ?? 0)
@@ -331,11 +352,11 @@ async function prepareFallbackTab(
 
   return {
     tab: toOpenTab(
-      toExcalidrawFile(tab),
+      toDocumentFile(tab),
       disk.content,
       disk.contentHash,
       disk.fileIdentity,
-      tab.sceneVersion + 1
+      tab.contentVersion + 1
     ),
     source: 'disk',
   }
@@ -560,9 +581,9 @@ function isMissingFileError(error: unknown): boolean {
 interface AppStore {
   // State
   currentDirectory: string | null
-  files: ExcalidrawFile[]
+  files: DocumentFile[]
   fileTree: FileTreeNode[]
-  activeFile: ExcalidrawFile | null
+  activeFile: DocumentFile | null
   fileContent: string | null
   activeFileLoadSource: FileLoadSource
   preferences: Preferences
@@ -575,9 +596,14 @@ interface AppStore {
   // Actions
   updateTabContent: (
     tabId: string,
-    sceneVersion: number,
+    contentVersion: number,
     content: string,
     scene: CachedExcalidrawScene
+  ) => void
+  updateMarkdownContent: (
+    tabId: string,
+    contentVersion: number,
+    content: string
   ) => void
   applySaveAsResult: (
     oldPath: string,
@@ -605,7 +631,7 @@ interface AppStore {
   // Async actions
   loadDirectory: (dir: string) => Promise<boolean>
   loadFileTree: (dir: string) => Promise<void>
-  loadFile: (file: ExcalidrawFile) => Promise<void>
+  loadFile: (file: DocumentFile) => Promise<void>
   loadFileFromTree: (node: FileTreeNode) => Promise<void>
   saveCurrentFile: (content?: string) => Promise<boolean>
   saveTabAs: (
@@ -620,7 +646,11 @@ interface AppStore {
   ) => Promise<boolean>
   resolveUnsavedTabsBeforeWorkspaceChange: () => Promise<boolean>
   reconcileActiveFileAfterExternalChange: () => Promise<void>
-  createNewFile: (fileName?: string, directory?: string) => Promise<void>
+  createNewFile: (
+    fileName?: string,
+    directory?: string,
+    kind?: DocumentKind
+  ) => Promise<void>
   createNewFolder: (folderName?: string, directory?: string) => Promise<void>
   renameFile: (oldPath: string, newName: string) => Promise<void>
   renameFolder: (oldPath: string, newName: string) => Promise<void>
@@ -679,7 +709,7 @@ function reconcilePostDeleteRecovery(
 
   return {
     openTabs,
-    activeFile: toExcalidrawFile(activeRecovery),
+    activeFile: toDocumentFile(activeRecovery),
     fileContent: activeRecovery.cachedContent,
     activeFileLoadSource: 'cache',
     isDirty: true,
@@ -709,9 +739,13 @@ export const useStore = create<AppStore>((set, get) => ({
   saveOperations: {},
 
   // Targeted synchronous actions
-  updateTabContent: (tabId, sceneVersion, content, scene) => set((state) => {
+  updateTabContent: (tabId, contentVersion, content, scene) => set((state) => {
     const tab = state.openTabs.find((candidate) => candidate.tabId === tabId)
-    if (!tab || tab.sceneVersion !== sceneVersion) {
+    if (
+      !tab ||
+      tab.kind !== 'excalidraw' ||
+      tab.contentVersion !== contentVersion
+    ) {
       return state
     }
 
@@ -719,8 +753,28 @@ export const useStore = create<AppStore>((set, get) => ({
     return {
       fileContent: isActive ? content : state.fileContent,
       openTabs: state.openTabs.map((candidate) =>
-        candidate.tabId === tabId
+        candidate.tabId === tabId && candidate.kind === 'excalidraw'
           ? { ...candidate, cachedContent: content, cachedScene: scene }
+          : candidate
+      ),
+    }
+  }),
+  updateMarkdownContent: (tabId, contentVersion, content) => set((state) => {
+    const tab = state.openTabs.find((candidate) => candidate.tabId === tabId)
+    if (
+      !tab ||
+      tab.kind !== 'markdown' ||
+      tab.contentVersion !== contentVersion
+    ) {
+      return state
+    }
+
+    const isActive = state.activeFile?.tabId === tabId
+    return {
+      fileContent: isActive ? content : state.fileContent,
+      openTabs: state.openTabs.map((candidate) =>
+        candidate.tabId === tabId && candidate.kind === 'markdown'
+          ? { ...candidate, cachedContent: content }
           : candidate
       ),
     }
@@ -749,7 +803,7 @@ export const useStore = create<AppStore>((set, get) => ({
       return false
     }
 
-    const updatedTab: OpenTab = {
+    const updatedBase = {
       ...sourceTab,
       name: pathBasename(newPath),
       path: newPath,
@@ -757,18 +811,24 @@ export const useStore = create<AppStore>((set, get) => ({
       cachedContent: content,
       contentHash,
       fileIdentity,
-      cachedScene: parseSceneFromContent(content),
       recoveryState: undefined,
       externalConflict: undefined,
       lifecycleVersion: nextLifecycleVersion(sourceTab),
     }
+    const updatedTab: OpenTab = sourceTab.kind === 'markdown'
+      ? { ...updatedBase, kind: 'markdown', cachedScene: undefined }
+      : {
+          ...updatedBase,
+          kind: 'excalidraw',
+          cachedScene: parseSceneFromContent(content),
+        }
 
     const sourceIsActive = state.activeFile?.tabId
       ? state.activeFile.tabId === sourceTab.tabId
       : state.activeFile?.path === oldPath
     set({
       activeFile: sourceIsActive
-        ? toExcalidrawFile(updatedTab)
+        ? toDocumentFile(updatedTab)
         : state.activeFile,
       fileContent: sourceIsActive ? content : state.fileContent,
       activeFileLoadSource: sourceIsActive ? 'cache' : state.activeFileLoadSource,
@@ -938,6 +998,7 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   reconcileActiveFileAfterExternalChange: async () => {
+    flushPendingEditorContent()
     const reconciliationState = get()
     const tabsByExactPath = new Map<string, OpenTab[]>()
     for (const tab of reconciliationState.openTabs) {
@@ -1140,7 +1201,7 @@ export const useStore = create<AppStore>((set, get) => ({
               tab.tabId === currentTab.tabId ? conflictTab : tab
             )
             if (isActive) {
-              activeFile = toExcalidrawFile(conflictTab)
+              activeFile = toDocumentFile(conflictTab)
               fileContent = conflictTab.cachedContent
               activeFileLoadSource = 'cache'
               isDirty = true
@@ -1157,7 +1218,7 @@ export const useStore = create<AppStore>((set, get) => ({
               tab.tabId === currentTab.tabId ? recoveryTab : tab
             )
             if (isActive) {
-              activeFile = toExcalidrawFile(recoveryTab)
+              activeFile = toDocumentFile(recoveryTab)
               fileContent = recoveryTab.cachedContent
               activeFileLoadSource = 'cache'
               isDirty = true
@@ -1193,7 +1254,7 @@ export const useStore = create<AppStore>((set, get) => ({
               tab.tabId === currentTab.tabId ? resolvedTab : tab
             )
             if (isActive) {
-              activeFile = toExcalidrawFile(resolvedTab)
+              activeFile = toDocumentFile(resolvedTab)
               isDirty = resolvedTab.modified
             }
             changed = true
@@ -1213,7 +1274,7 @@ export const useStore = create<AppStore>((set, get) => ({
               tab.tabId === currentTab.tabId ? conflictTab : tab
             )
             if (isActive) {
-              activeFile = toExcalidrawFile(conflictTab)
+              activeFile = toDocumentFile(conflictTab)
               fileContent = conflictTab.cachedContent
               activeFileLoadSource = 'cache'
               isDirty = true
@@ -1225,11 +1286,11 @@ export const useStore = create<AppStore>((set, get) => ({
 
         const reloadedTab: OpenTab = {
           ...toOpenTab(
-            toExcalidrawFile(currentTab),
+            toDocumentFile(currentTab),
             result.disk.content,
             result.disk.contentHash,
             result.disk.fileIdentity,
-            currentTab.sceneVersion + 1
+            currentTab.contentVersion + 1
           ),
           lifecycleVersion: nextLifecycleVersion(currentTab),
         }
@@ -1237,7 +1298,7 @@ export const useStore = create<AppStore>((set, get) => ({
           tab.tabId === currentTab.tabId ? reloadedTab : tab
         )
         if (isActive) {
-          activeFile = toExcalidrawFile(reloadedTab)
+          activeFile = toDocumentFile(reloadedTab)
           fileContent = reloadedTab.cachedContent
           activeFileLoadSource = 'disk'
           isDirty = false
@@ -1302,11 +1363,11 @@ export const useStore = create<AppStore>((set, get) => ({
           } else {
             const cleanTab = await readOpenTabFromDisk(
               state.activeFile,
-              (existingTab?.sceneVersion || 0) + 1
+              (existingTab?.contentVersion || 0) + 1
             )
 
             set((currentState) => ({
-              activeFile: toExcalidrawFile(cleanTab),
+              activeFile: toDocumentFile(cleanTab),
               fileContent: cleanTab.cachedContent,
               activeFileLoadSource: 'disk',
               isDirty: false,
@@ -1339,7 +1400,7 @@ export const useStore = create<AppStore>((set, get) => ({
           existingTab.externalConflict === 'modified-on-disk'
         ) {
           set({
-            activeFile: toExcalidrawFile(existingTab),
+            activeFile: toDocumentFile(existingTab),
             fileContent: existingTab.cachedContent,
             activeFileLoadSource: 'cache',
             isDirty: true,
@@ -1360,7 +1421,7 @@ export const useStore = create<AppStore>((set, get) => ({
             }
             const recoveryTab = toRecoveryTab(currentTab)
             set((currentState) => ({
-              activeFile: toExcalidrawFile(recoveryTab),
+              activeFile: toDocumentFile(recoveryTab),
               fileContent: recoveryTab.cachedContent,
               activeFileLoadSource: 'cache',
               isDirty: true,
@@ -1383,7 +1444,7 @@ export const useStore = create<AppStore>((set, get) => ({
               currentTab.recoveryState === 'deleted-on-disk' ||
               currentTab.externalConflict === 'modified-on-disk'
             set({
-              activeFile: toExcalidrawFile(currentTab),
+              activeFile: toDocumentFile(currentTab),
               fileContent: currentTab.cachedContent,
               activeFileLoadSource: 'cache',
               isDirty: hasUnsavedContent,
@@ -1397,7 +1458,7 @@ export const useStore = create<AppStore>((set, get) => ({
           disk.fileIdentity === existingTab.fileIdentity
         if (diskMatches) {
           set({
-            activeFile: toExcalidrawFile(existingTab),
+            activeFile: toDocumentFile(existingTab),
             fileContent: existingTab.cachedContent,
             activeFileLoadSource: 'cache',
             isDirty: existingTab.modified,
@@ -1413,7 +1474,7 @@ export const useStore = create<AppStore>((set, get) => ({
             lifecycleVersion: nextLifecycleVersion(existingTab),
           }
           set((currentState) => ({
-            activeFile: toExcalidrawFile(conflictTab),
+            activeFile: toDocumentFile(conflictTab),
             fileContent: conflictTab.cachedContent,
             activeFileLoadSource: 'cache',
             isDirty: true,
@@ -1425,14 +1486,14 @@ export const useStore = create<AppStore>((set, get) => ({
         }
 
         const updatedTab = toOpenTab(
-          toExcalidrawFile(existingTab),
+          toDocumentFile(existingTab),
           disk.content,
           disk.contentHash,
           disk.fileIdentity,
-          existingTab.sceneVersion + 1
+          existingTab.contentVersion + 1
         )
         set((currentState) => ({
-          activeFile: toExcalidrawFile(updatedTab),
+          activeFile: toDocumentFile(updatedTab),
           fileContent: updatedTab.cachedContent,
           activeFileLoadSource: 'disk',
           isDirty: false,
@@ -1455,7 +1516,7 @@ export const useStore = create<AppStore>((set, get) => ({
         const tabToActivate = concurrentlyOpenedTab ?? updatedTab
         openedNewTab = !concurrentlyOpenedTab
         return {
-          activeFile: toExcalidrawFile(tabToActivate),
+          activeFile: toDocumentFile(tabToActivate),
           fileContent: tabToActivate.cachedContent,
           activeFileLoadSource: concurrentlyOpenedTab ? 'cache' : 'disk',
           isDirty: isUnsavedTab(tabToActivate),
@@ -1505,16 +1566,22 @@ export const useStore = create<AppStore>((set, get) => ({
   loadFileFromTree: async (node) => {
     if (node.is_directory) return
 
+    const kind = node.kind ?? documentKindFromPath(node.path)
+    if (!kind) {
+      throw new Error(`Unsupported document type: ${node.path}`)
+    }
+
     await get().loadFile({
       name: node.name,
       path: node.path,
+      kind,
       modified: node.modified,
     })
   },
 
   // Save current file
   saveCurrentFile: async (content) => {
-    flushPendingEditorScene(get().activeFile?.tabId)
+    flushPendingEditorContent(get().activeFile?.tabId)
     const state = get()
     const { activeFile, fileContent, isDirty } = state
 
@@ -1549,17 +1616,17 @@ export const useStore = create<AppStore>((set, get) => ({
       return false
     }
 
-    // Validate JSON before saving
-    try {
-      const parsed = JSON.parse(contentToSave)
-      if (!parsed || typeof parsed !== 'object') {
-        console.error('[saveCurrentFile] Invalid JSON structure')
+    if (activeTab.kind === 'excalidraw') {
+      try {
+        const parsed = JSON.parse(contentToSave)
+        if (!parsed || typeof parsed !== 'object') {
+          console.error('[saveCurrentFile] Invalid JSON structure')
+          return false
+        }
+      } catch (jsonError) {
+        console.error('[saveCurrentFile] Invalid JSON, not saving:', jsonError)
         return false
       }
-
-    } catch (jsonError) {
-      console.error('[saveCurrentFile] Invalid JSON, not saving:', jsonError)
-      return false
     }
 
     const saveOperationId = state.beginSaveOperation(activeFile.path)
@@ -1577,7 +1644,7 @@ export const useStore = create<AppStore>((set, get) => ({
           (beforeWrite.activeFile?.tabId === activeTab.tabId &&
             beforeWrite.fileContent !== contentToSave)
         ) {
-          alert('The drawing changed while waiting to be saved. The latest changes remain open.')
+          alert('The document changed while waiting to be saved. The latest changes remain open.')
           return false
         }
 
@@ -1615,7 +1682,7 @@ export const useStore = create<AppStore>((set, get) => ({
           if (currentTab && isUnsavedTab(currentTab)) {
             get().markTreeNodeAsModified(currentTab.path, true)
           }
-          alert('The drawing changed while it was being saved. The latest changes remain open; save again before closing.')
+          alert('The document changed while it was being saved. The latest changes remain open; save again before closing.')
           return false
         }
 
@@ -1659,7 +1726,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const requestedTab = get().openTabs.find((tab) =>
       tabId ? tab.tabId === tabId : tab.path === filePath
     )
-    flushPendingEditorScene(requestedTab?.tabId)
+    flushPendingEditorContent(requestedTab?.tabId)
     const snapshot = get()
     const sourceTab = snapshot.openTabs.find((tab) =>
       tabId ? tab.tabId === tabId : tab.path === filePath
@@ -1670,7 +1737,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
     let destination: string | null
     try {
-      destination = await getNativeApi().files.selectSavePath()
+      destination = await getNativeApi().files.selectSavePath(sourceTab.kind)
     } catch (error) {
       console.error('[saveTabAs] Failed to select destination:', error)
       alert(`Failed to select a save destination: ${error}`)
@@ -1692,8 +1759,8 @@ export const useStore = create<AppStore>((set, get) => ({
         sourceTab.recoveryState === 'deleted-on-disk'
           ? 'Choose a new path for this recovery copy. The deleted path will not be overwritten.'
           : sourceTab.externalConflict === 'modified-on-disk'
-            ? 'Choose a new path for this conflicted drawing. The externally changed file will not be overwritten.'
-          : 'Choose a different destination, or use Save to update the current drawing.'
+            ? 'Choose a new path for this conflicted document. The externally changed file will not be overwritten.'
+          : 'Choose a different destination, or use Save to update the current document.'
       )
       return null
     }
@@ -1704,7 +1771,7 @@ export const useStore = create<AppStore>((set, get) => ({
           pathsEqual(tab.path, destination)
       )
     ) {
-      alert('That drawing is already open. Choose a different save destination.')
+      alert('That document is already open. Choose a different save destination.')
       return null
     }
 
@@ -1716,7 +1783,7 @@ export const useStore = create<AppStore>((set, get) => ({
           pathsEqual(tab.path, destination)
       )
     ) {
-      alert('That drawing is already open. Choose a different save destination.')
+      alert('That document is already open. Choose a different save destination.')
       return null
     }
 
@@ -1727,7 +1794,7 @@ export const useStore = create<AppStore>((set, get) => ({
       !currentBeforeWrite ||
       !hasSameSavableContent(currentBeforeWrite, sourceTab)
     ) {
-      alert('The drawing changed while choosing a destination. Review it and try Save As again.')
+      alert('The document changed while choosing a destination. Review it and try Save As again.')
       return null
     }
 
@@ -1756,7 +1823,7 @@ export const useStore = create<AppStore>((set, get) => ({
         !currentAfterWrite ||
         !hasSameSavableContent(currentAfterWrite, sourceTab)
       ) {
-        alert('The drawing changed while the copy was being saved. The latest changes remain open.')
+        alert('The document changed while the copy was being saved. The latest changes remain open.')
         return null
       }
 
@@ -1797,7 +1864,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const requestedTab = get().openTabs.find((tab) =>
       tabId ? tab.tabId === tabId : tab.path === filePath
     )
-    flushPendingEditorScene(requestedTab?.tabId)
+    flushPendingEditorContent(requestedTab?.tabId)
     const snapshot = get()
     const tab = snapshot.openTabs.find((openTab) =>
       tabId ? openTab.tabId === tabId : openTab.path === filePath
@@ -1821,7 +1888,7 @@ export const useStore = create<AppStore>((set, get) => ({
       ) &&
       snapshot.fileContent !== tab.cachedContent
     ) {
-      alert('The active drawing changed before it could be saved. Review it and try again.')
+      alert('The active document changed before it could be saved. Review it and try again.')
       return false
     }
 
@@ -1844,7 +1911,7 @@ export const useStore = create<AppStore>((set, get) => ({
           !hasSameSavableContent(beforeWriteTab, tab) ||
           activeContentChanged
         ) {
-          alert('The drawing changed while waiting to be saved. Review it and try again.')
+          alert('The document changed while waiting to be saved. Review it and try again.')
           return false
         }
 
@@ -1886,7 +1953,7 @@ export const useStore = create<AppStore>((set, get) => ({
           if (currentTab && isUnsavedTab(currentTab)) {
             get().markTreeNodeAsModified(currentTab.path, true)
           }
-          alert('The drawing changed while it was being saved. Review it and try again.')
+          alert('The document changed while it was being saved. Review it and try again.')
           return false
         }
 
@@ -1925,7 +1992,7 @@ export const useStore = create<AppStore>((set, get) => ({
       })
     } catch (error) {
       console.error('[saveTabForWorkspaceResolution] Failed to save tab:', error)
-      alert(`Failed to save drawing: ${error}`)
+      alert(`Failed to save document: ${error}`)
       return false
     } finally {
       get().endSaveOperation(saveOperationId)
@@ -1946,7 +2013,7 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   // Create new file
-  createNewFile: async (fileName, directory) => {
+  createNewFile: async (fileName, directory, kind = 'excalidraw') => {
     const state = get()
     let { currentDirectory } = state
 
@@ -1978,11 +2045,11 @@ export const useStore = create<AppStore>((set, get) => ({
           } else {
             const cleanTab = await readOpenTabFromDisk(
               state.activeFile,
-              (existingTab?.sceneVersion || 0) + 1
+              (existingTab?.contentVersion || 0) + 1
             )
 
             set((currentState) => ({
-              activeFile: toExcalidrawFile(cleanTab),
+              activeFile: toDocumentFile(cleanTab),
               fileContent: cleanTab.cachedContent,
               activeFileLoadSource: 'disk',
               isDirty: false,
@@ -2020,26 +2087,29 @@ export const useStore = create<AppStore>((set, get) => ({
     }
 
     // Generate default filename if not provided
-    const finalFileName = fileName || `Untitled-${Date.now()}.excalidraw`
-    const requestedFileName = finalFileName.endsWith('.excalidraw')
-      ? finalFileName
-      : `${finalFileName}.excalidraw`
+    const finalFileName = fileName || (
+      kind === 'markdown'
+        ? `Untitled-${Date.now()}.md`
+        : `Untitled-${Date.now()}.excalidraw`
+    )
+    const requestedFileName = ensureDocumentExtension(finalFileName, kind)
     const targetDirectory = directory || currentDirectory
 
     try {
       // Create the new file
       const filePath = await getNativeApi().workspace.createFile(
         targetDirectory,
-        requestedFileName
+        requestedFileName,
+        kind
       )
 
       // Reload the file tree to show the new file
       await state.loadFileTree(currentDirectory)
 
-      // Create an ExcalidrawFile object for the new file
-      const file: ExcalidrawFile = {
+      const file: DocumentFile = {
         name: pathBasename(filePath),
         path: filePath,
+        kind,
         modified: false,
       }
 
@@ -2095,18 +2165,23 @@ export const useStore = create<AppStore>((set, get) => ({
   // Rename file
   renameFile: async (oldPath, newName) => {
     try {
-      // Ensure the new name has .excalidraw extension
-      const finalName = newName.endsWith('.excalidraw')
-        ? newName
-        : `${newName}.excalidraw`
+      const snapshot = get()
+      const document = snapshot.openTabs.find((tab) => tab.path === oldPath) ??
+        snapshot.files.find((file) => file.path === oldPath)
+      const kind = document?.kind ?? documentKindFromPath(oldPath)
+      if (!kind) {
+        throw new Error(`Unsupported document type: ${oldPath}`)
+      }
+      const finalName = ensureDocumentExtension(newName, kind)
 
       const newPath = await getNativeApi().workspace.renameFile(oldPath, finalName)
+      const renamedName = pathBasename(newPath)
 
       const state = get()
       const renamedFile = state.activeFile?.path === oldPath
         ? {
             ...state.activeFile,
-            name: finalName,
+            name: renamedName,
             path: newPath,
             modified: state.isDirty,
           }
@@ -2118,7 +2193,7 @@ export const useStore = create<AppStore>((set, get) => ({
           tab.path === oldPath
             ? {
                 ...tab,
-                name: finalName,
+                name: renamedName,
                 path: newPath,
                 lifecycleVersion: nextLifecycleVersion(tab),
               }
@@ -2240,7 +2315,7 @@ export const useStore = create<AppStore>((set, get) => ({
           (tab) => affectedTabIds.has(tab.tabId)
         )
       ) {
-        throw new Error('The drawing changed while deletion was pending. Review it and try again.')
+        throw new Error('The document changed while deletion was pending. Review it and try again.')
       }
 
       await getNativeApi().workspace.deleteFile(filePath)
@@ -2299,7 +2374,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
         return {
           openTabs: fallback.openTabs,
-          activeFile: toExcalidrawFile(fallback.fallbackTab),
+          activeFile: toDocumentFile(fallback.fallbackTab),
           fileContent: fallback.fallbackTab.cachedContent,
           activeFileLoadSource: fallback.source,
           isDirty: fallback.fallbackTab.modified,
@@ -2313,13 +2388,13 @@ export const useStore = create<AppStore>((set, get) => ({
 
       if (recoveryRequired) {
         throw new DeletionRecoveryError(
-          'The drawing was deleted on disk, but edits made during deletion remain open as a recovery copy.'
+          'The document was deleted on disk, but edits made during deletion remain open as a recovery copy.'
         )
       }
 
       if (fallbackActivationBlocked) {
         throw new DeletionFallbackValidationError(
-          'The drawing was deleted, but the next tab could not be validated against disk and was left inactive.'
+          'The document was deleted, but the next tab could not be validated against disk and was left inactive.'
         )
       }
 
@@ -2458,7 +2533,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
         return {
           openTabs: fallback.openTabs,
-          activeFile: toExcalidrawFile(fallback.fallbackTab),
+          activeFile: toDocumentFile(fallback.fallbackTab),
           fileContent: fallback.fallbackTab.cachedContent,
           activeFileLoadSource: fallback.source,
           isDirty: fallback.fallbackTab.modified,

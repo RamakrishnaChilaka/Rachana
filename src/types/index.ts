@@ -3,10 +3,12 @@ import type {
   AppState as ExcalidrawAppState,
   BinaryFiles,
 } from '@excalidraw/excalidraw/types'
+import type { DocumentKind } from '../lib/documentKind'
 
-export interface ExcalidrawFile {
+export interface DocumentFile {
   name: string
   path: string
+  kind: DocumentKind
   modified: boolean
   tabId?: string
 }
@@ -17,21 +19,34 @@ export interface CachedExcalidrawScene {
   files?: BinaryFiles
 }
 
-export interface OpenTab extends ExcalidrawFile {
+interface BaseOpenTab extends DocumentFile {
   tabId: string
   cachedContent: string
   contentHash: string
   fileIdentity?: string
-  cachedScene: CachedExcalidrawScene
-  sceneVersion: number
+  cachedScene?: CachedExcalidrawScene
+  contentVersion: number
   recoveryState?: 'deleted-on-disk'
   externalConflict?: 'modified-on-disk'
   lifecycleVersion?: number
 }
 
+export interface ExcalidrawOpenTab extends BaseOpenTab {
+  kind: 'excalidraw'
+  cachedScene: CachedExcalidrawScene
+}
+
+export interface MarkdownOpenTab extends BaseOpenTab {
+  kind: 'markdown'
+  cachedScene?: never
+}
+
+export type OpenTab = ExcalidrawOpenTab | MarkdownOpenTab
+
 export interface FileTreeNode {
   name: string
   path: string
+  kind?: DocumentKind
   is_directory: boolean
   modified: boolean
   children?: FileTreeNode[]

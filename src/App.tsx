@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { ExcalidrawEditor } from './components/ExcalidrawEditor'
 import { LaserPointer } from './components/LaserPointer'
@@ -12,11 +12,19 @@ import { useFileSystemChangeListener } from './hooks/useFileSystemChangeListener
 import { handleAppCloseRequest } from './lib/tabLifecycle'
 import { getNativeApi } from './lib/native'
 
+const MarkdownEditor = lazy(async () => {
+  const module = await import('./components/MarkdownEditor')
+  return { default: module.MarkdownEditor }
+})
+
 function App() {
   const loadPreferences = useStore((state) => state.loadPreferences)
   const currentDirectory = useStore((state) => state.currentDirectory)
   const sidebarVisible = useStore((state) => state.sidebarVisible)
   const presentationMode = useStore((state) => state.presentationMode)
+  const hasMarkdownTabs = useStore((state) =>
+    state.openTabs.some((tab) => tab.kind === 'markdown')
+  )
   const theme = useResolvedTheme()
 
   // Load preferences and setup on mount
@@ -65,9 +73,9 @@ function App() {
           saveActive: () => useStore.getState().saveCurrentFile(),
           notifyBlocked: async (unsavedCount) => {
             await native.dialogs.message(
-              `${unsavedCount} drawing${unsavedCount === 1 ? ' has' : 's have'} unsaved or recovery changes. Save or close those tabs before quitting.`,
+              `${unsavedCount} document${unsavedCount === 1 ? ' has' : 's have'} unsaved or recovery changes. Save or close those tabs before quitting.`,
               {
-                title: 'Unsaved Drawings',
+                title: 'Unsaved Documents',
                 kind: 'warning',
               }
             )
@@ -97,9 +105,19 @@ function App() {
   return (
     <div className={`app-shell ${presentationMode ? 'cursor-none' : ''}`}>
       {sidebarVisible && !presentationMode && <Sidebar />}
-      <section className="editor-column" aria-label="Drawing editor">
+      <section className="editor-column" aria-label="Document editor">
         <DocumentChrome />
-        <ExcalidrawEditor theme={theme} />
+        <div className="editor-stack">
+          <ExcalidrawEditor theme={theme} />
+          {hasMarkdownTabs && (
+            <Suspense fallback={null}>
+              <MarkdownEditor
+                theme={theme}
+                presentationMode={presentationMode}
+              />
+            </Suspense>
+          )}
+        </div>
       </section>
       {presentationMode && <LaserPointer />}
       <WindowResizeHandles />

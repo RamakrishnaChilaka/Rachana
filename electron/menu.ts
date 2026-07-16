@@ -53,6 +53,7 @@ export function buildApplicationMenu(
       submenu: [
         { label: 'Open Directory', accelerator: 'CmdOrCtrl+O', click: () => sendCommand(window, { command: 'open_directory' }) },
         { label: 'New File', accelerator: 'CmdOrCtrl+N', click: () => sendCommand(window, { command: 'new_file' }) },
+        { label: 'New Note', accelerator: 'CmdOrCtrl+Alt+N', click: () => sendCommand(window, { command: 'new_note' }) },
         { label: 'New Folder', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendCommand(window, { command: 'new_folder' }) },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendCommand(window, { command: 'save' }) },

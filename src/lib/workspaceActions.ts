@@ -32,6 +32,23 @@ export async function createDrawing(): Promise<void> {
   await useStore.getState().createNewFile(fileName)
 }
 
+export async function createMarkdownDocument(): Promise<void> {
+  if (!(await ensureWorkspace())) {
+    return
+  }
+
+  const fileName = await promptForName({
+    title: 'Note name',
+    defaultValue: 'Untitled.md',
+    confirmLabel: 'Create note',
+  })
+  if (!fileName) {
+    return
+  }
+
+  await useStore.getState().createNewFile(fileName, undefined, 'markdown')
+}
+
 export async function createWorkspaceFolder(): Promise<void> {
   if (!(await ensureWorkspace())) {
     return

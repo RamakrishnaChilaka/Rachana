@@ -22,6 +22,7 @@ function createTab(
     files: {},
   })
   return {
+    kind: 'excalidraw',
     tabId: `save-status-store-tab-${++nextTestTabId}`,
     name,
     path: `/drawings/${name}`,
@@ -30,7 +31,7 @@ function createTab(
     cachedContent,
     contentHash: `${name}-hash`,
     cachedScene: { elements: [], appState: {}, files: {} },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 

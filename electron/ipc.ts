@@ -25,12 +25,12 @@ import {
   deleteFolder,
   getDeletionScopeMatches,
   getFileTree,
-  listExcalidrawFiles,
-  readExcalidrawFile,
+  listDocumentFiles,
+  readDocumentFile,
   renameFile,
   renameFolder,
-  saveExcalidrawFile,
-  saveExcalidrawFileAs,
+  saveDocumentFile,
+  saveDocumentFileAs,
 } from './filesystem'
 import { setApplicationMenu } from './menu'
 import { PreferencesStore } from './preferences'
@@ -45,6 +45,12 @@ import {
   saveFileAsSchema,
   saveFileSchema,
 } from './validation'
+import {
+  DOCUMENT_KINDS,
+  documentKindFromPath,
+  ensureDocumentExtension,
+  type DocumentKind,
+} from '../src/lib/documentKind'
 
 interface ResizeSession {
   direction: ResizeDirection
@@ -111,7 +117,7 @@ async function watchDirectory(directory: string, services: NativeServices): Prom
   const emitChange = (changedPath: string) => {
     if (
       generation === watchGeneration &&
-      path.extname(changedPath).toLocaleLowerCase('en-US') === '.excalidraw'
+      documentKindFromPath(changedPath) !== null
     ) {
       requireWindow(services).webContents.send(
         IPC.eventFileSystemChange,
@@ -166,7 +172,7 @@ export function registerNativeIpc(services: NativeServices): void {
     return result.canceled ? null : result.filePaths[0] ?? null
   })
   handle(IPC.workspaceListFiles, services, (directory: string) =>
-    listExcalidrawFiles(absolutePathSchema.parse(directory))
+    listDocumentFiles(absolutePathSchema.parse(directory))
   )
   handle(IPC.workspaceGetFileTree, services, (directory: string) =>
     getFileTree(absolutePathSchema.parse(directory))
@@ -184,8 +190,16 @@ export function registerNativeIpc(services: NativeServices): void {
         z.array(absolutePathSchema).parse(candidatePaths)
       )
   )
-  handle(IPC.workspaceCreateFile, services, (directory: string, fileName: string) =>
-    createNewFile(absolutePathSchema.parse(directory), nameSchema.parse(fileName))
+  handle(IPC.workspaceCreateFile, services, (
+    directory: string,
+    fileName: string,
+    kind: DocumentKind
+  ) =>
+    createNewFile(
+      absolutePathSchema.parse(directory),
+      nameSchema.parse(fileName),
+      z.enum(DOCUMENT_KINDS).parse(kind)
+    )
   )
   handle(IPC.workspaceCreateFolder, services, (directory: string, folderName: string) =>
     createNewFolder(absolutePathSchema.parse(directory), nameSchema.parse(folderName))
@@ -203,20 +217,25 @@ export function registerNativeIpc(services: NativeServices): void {
     deleteFolder(absolutePathSchema.parse(folderPath))
   )
   handle(IPC.filesRead, services, (filePath: string) =>
-    readExcalidrawFile(absolutePathSchema.parse(filePath))
+    readDocumentFile(absolutePathSchema.parse(filePath))
   )
   handle(IPC.filesSave, services, (request: SaveFileRequest) =>
-    saveExcalidrawFile(saveFileSchema.parse(request))
+    saveDocumentFile(saveFileSchema.parse(request))
   )
-  handle(IPC.filesSelectSavePath, services, async () => {
+  handle(IPC.filesSelectSavePath, services, async (kind: DocumentKind) => {
+    const validatedKind = z.enum(DOCUMENT_KINDS).parse(kind)
     const result = await dialog.showSaveDialog(requireWindow(services), {
       title: 'Save As',
-      filters: [{ name: 'Excalidraw', extensions: ['excalidraw'] }],
+      filters: validatedKind === 'markdown'
+        ? [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
+        : [{ name: 'Excalidraw', extensions: ['excalidraw'] }],
     })
-    return result.canceled ? null : result.filePath ?? null
+    return result.canceled || !result.filePath
+      ? null
+      : ensureDocumentExtension(result.filePath, validatedKind)
   })
   handle(IPC.filesSaveAs, services, (request: SaveFileAsRequest) =>
-    saveExcalidrawFileAs(saveFileAsSchema.parse(request))
+    saveDocumentFileAs(saveFileAsSchema.parse(request))
   )
   handle(IPC.preferencesGet, services, () => services.preferences.get())
   handle(IPC.preferencesSave, services, async (preferences: Preferences) => {

@@ -17,6 +17,7 @@ describe('menu Save As', () => {
     const saveTabAs = vi.fn().mockResolvedValue(true)
     useStore.setState({
       activeFile: {
+        kind: 'excalidraw',
         tabId: 'duplicate-tab-2',
         name: 'Duplicate.excalidraw',
         path: '/drawings/Duplicate.excalidraw',
@@ -32,6 +33,19 @@ describe('menu Save As', () => {
       undefined,
       'duplicate-tab-2'
     )
+  })
+})
+
+describe('keyboard shortcuts menu', () => {
+  it('includes the Markdown note shortcut', async () => {
+    const alert = vi.spyOn(globalThis, 'alert').mockImplementation(() => {})
+
+    await executeMenuCommand({ command: 'keyboard_shortcuts' })
+
+    expect(alert).toHaveBeenCalledWith(
+      expect.stringContaining('New note: Cmd/Ctrl+Alt+N')
+    )
+    alert.mockRestore()
   })
 })
 
@@ -51,6 +65,7 @@ describe('canvas menu commands', () => {
     const unregisterActive = registerEditorExcalidrawAPI('menu-tab', activeAPI)
     useStore.setState({
       activeFile: {
+        kind: 'excalidraw',
         tabId: 'menu-tab',
         name: 'Menu.excalidraw',
         path: '/drawings/Menu.excalidraw',
@@ -85,6 +100,7 @@ describe('canvas menu commands', () => {
     mockAppWindow.isFullscreen.mockResolvedValue(false)
     useStore.setState({
       activeFile: {
+        kind: 'excalidraw',
         tabId: 'fullscreen-1',
         name: 'First.excalidraw',
         path: '/drawings/First.excalidraw',
@@ -95,6 +111,7 @@ describe('canvas menu commands', () => {
     await executeMenuCommand({ command: 'fullscreen' })
     useStore.setState({
       activeFile: {
+        kind: 'excalidraw',
         tabId: 'fullscreen-2',
         name: 'Second.excalidraw',
         path: '/drawings/Second.excalidraw',
@@ -108,6 +125,7 @@ describe('canvas menu commands', () => {
 
     useStore.setState({
       activeFile: {
+        kind: 'excalidraw',
         tabId: 'fullscreen-1',
         name: 'First.excalidraw',
         path: '/drawings/First.excalidraw',

@@ -18,6 +18,7 @@ function createTab(recoveryState?: OpenTab['recoveryState']): OpenTab {
     files: {},
   })
   return {
+    kind: 'excalidraw',
     tabId: `autosave-tab-${++nextTestTabId}`,
     name: 'Plan.excalidraw',
     path: '/drawings/Plan.excalidraw',
@@ -26,7 +27,7 @@ function createTab(recoveryState?: OpenTab['recoveryState']): OpenTab {
     cachedContent,
     contentHash: 'old-hash',
     cachedScene: { elements: [], appState: {}, files: {} },
-    sceneVersion: 0,
+    contentVersion: 0,
   }
 }
 

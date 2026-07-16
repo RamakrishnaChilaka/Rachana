@@ -1,4 +1,5 @@
-import type { ExcalidrawFile, FileTreeNode, Preferences } from '../types'
+import type { DocumentFile, FileTreeNode, Preferences } from '../types'
+import type { DocumentKind } from './documentKind'
 
 export interface NativeFileContent {
   content: string
@@ -61,7 +62,7 @@ export type ResizeDirection =
 export interface RachanaNativeApi {
   workspace: {
     selectDirectory(): Promise<string | null>
-    listFiles(directory: string): Promise<ExcalidrawFile[]>
+    listFiles(directory: string): Promise<DocumentFile[]>
     getFileTree(directory: string): Promise<FileTreeNode[]>
     watch(directory: string): Promise<void>
     getDeletionScopeMatches(
@@ -69,7 +70,11 @@ export interface RachanaNativeApi {
       isDirectory: boolean,
       candidatePaths: string[]
     ): Promise<boolean[]>
-    createFile(directory: string, fileName: string): Promise<string>
+    createFile(
+      directory: string,
+      fileName: string,
+      kind: DocumentKind
+    ): Promise<string>
     createFolder(directory: string, folderName: string): Promise<string>
     renameFile(oldPath: string, newName: string): Promise<string>
     renameFolder(oldPath: string, newName: string): Promise<string>
@@ -79,7 +84,7 @@ export interface RachanaNativeApi {
   files: {
     read(filePath: string): Promise<NativeFileContent>
     save(request: SaveFileRequest): Promise<NativeSaveResult>
-    selectSavePath(): Promise<string | null>
+    selectSavePath(kind: DocumentKind): Promise<string | null>
     saveAs(request: SaveFileAsRequest): Promise<NativeSaveResult>
   }
   preferences: {

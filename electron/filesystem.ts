@@ -12,7 +12,13 @@ import type {
   SaveFileAsRequest,
   SaveFileRequest,
 } from '../src/lib/native'
-import type { ExcalidrawFile, FileTreeNode } from '../src/types'
+import type { DocumentFile, FileTreeNode } from '../src/types'
+import {
+  documentKindFromPath,
+  ensureDocumentExtension,
+  isSupportedDocumentPath,
+  type DocumentKind,
+} from '../src/lib/documentKind'
 
 const DEFAULT_DRAWING = JSON.stringify({
   type: 'excalidraw',
@@ -38,10 +44,12 @@ function assertAbsolutePath(candidate: string): void {
   }
 }
 
-function validateExcalidrawPath(candidate: string): void {
-  if (path.extname(candidate).toLocaleLowerCase('en-US') !== '.excalidraw') {
-    throw new Error('Expected a .excalidraw file')
+function validateDocumentPath(candidate: string): DocumentKind {
+  const kind = documentKindFromPath(candidate)
+  if (!kind) {
+    throw new Error('Expected a supported .excalidraw, .md, or .markdown file')
   }
+  return kind
 }
 
 function validateExcalidrawContent(content: string): void {
@@ -63,6 +71,12 @@ function validateExcalidrawContent(content: string): void {
   }
   if (!Array.isArray(drawing.elements)) {
     throw new Error('Elements field must be an array')
+  }
+}
+
+function validateDocumentContent(kind: DocumentKind, content: string): void {
+  if (kind === 'excalidraw') {
+    validateExcalidrawContent(content)
   }
 }
 
@@ -94,7 +108,7 @@ async function existingCanonicalPath(candidate: string): Promise<string> {
 
 async function destinationPath(candidate: string): Promise<string> {
   assertAbsolutePath(candidate)
-  validateExcalidrawPath(candidate)
+  validateDocumentPath(candidate)
   try {
     return await fs.realpath(candidate)
   } catch (error) {
@@ -107,7 +121,7 @@ async function destinationPath(candidate: string): Promise<string> {
 async function readHandleText(handle: FileHandle): Promise<string> {
   const stats = await handle.stat({ bigint: true })
   if (stats.size > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error('Drawing is too large to read safely')
+    throw new Error('Document is too large to read safely')
   }
   const buffer = Buffer.alloc(Number(stats.size))
   let offset = 0
@@ -136,7 +150,7 @@ async function writeHandleText(handle: FileHandle, content: string): Promise<voi
       offset
     )
     if (bytesWritten === 0) {
-      throw new Error('Unable to make progress while writing the drawing')
+      throw new Error('Unable to make progress while writing the document')
     }
     offset += bytesWritten
   }
@@ -149,7 +163,7 @@ async function copyPreparedContent(
 ): Promise<void> {
   const preparedStats = await prepared.stat({ bigint: true })
   if (preparedStats.size > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error('Prepared drawing is too large to save safely')
+    throw new Error('Prepared document is too large to save safely')
   }
   await destination.truncate(0)
   const buffer = Buffer.alloc(64 * 1024)
@@ -163,7 +177,7 @@ async function copyPreparedContent(
       offset
     )
     if (bytesRead === 0) {
-      throw new Error('Prepared drawing ended before the save completed')
+      throw new Error('Prepared document ended before the save completed')
     }
     let written = 0
     while (written < bytesRead) {
@@ -174,7 +188,7 @@ async function copyPreparedContent(
         offset + written
       )
       if (result.bytesWritten === 0) {
-        throw new Error('Unable to make progress while saving the drawing')
+        throw new Error('Unable to make progress while saving the document')
       }
       written += result.bytesWritten
     }
@@ -249,10 +263,10 @@ async function overwriteExisting(
     originalMode = Number(openedStats.mode)
     originalContent = await readHandleText(handle)
     if (expected?.fileIdentity !== undefined && openedIdentity !== expected.fileIdentity) {
-      throw new Error('The drawing was replaced on disk since it was opened. Reload or save a copy before retrying.')
+      throw new Error('The document was replaced on disk since it was opened. Reload or save a copy before retrying.')
     }
     if (expected?.contentHash !== undefined && contentHash(originalContent) !== expected.contentHash) {
-      throw new Error('The drawing changed on disk since it was opened. Reload or save a copy before retrying.')
+      throw new Error('The document changed on disk since it was opened. Reload or save a copy before retrying.')
     }
     const staged = await syncedTemporaryFile(destination, content)
     try {
@@ -282,7 +296,7 @@ async function overwriteExisting(
           await handle.chmod(originalMode)
         } catch (restoreError) {
           throw new Error(
-            `Failed to save drawing (${errorMessage(error)}) and restore its previous content (${errorMessage(restoreError)})`
+            `Failed to save document (${errorMessage(error)}) and restore its previous content (${errorMessage(restoreError)})`
           )
         }
       }
@@ -358,11 +372,13 @@ async function buildTree(directory: string): Promise<FileTreeNode[]> {
       })
     } else if (
       entry.isFile() &&
-      path.extname(entry.name).toLocaleLowerCase('en-US') === '.excalidraw'
+      isSupportedDocumentPath(entry.name)
     ) {
+      const kind = validateDocumentPath(entry.name)
       nodes.push({
         name: entry.name,
         path: entryPath,
+        kind,
         is_directory: false,
         modified: false,
       })
@@ -376,16 +392,21 @@ async function buildTree(directory: string): Promise<FileTreeNode[]> {
   })
 }
 
-export async function listExcalidrawFiles(directory: string): Promise<ExcalidrawFile[]> {
+export async function listDocumentFiles(directory: string): Promise<DocumentFile[]> {
   const root = await existingCanonicalPath(directory)
   const tree = await buildTree(root)
-  const files: ExcalidrawFile[] = []
+  const files: DocumentFile[] = []
   const collect = (nodes: FileTreeNode[]) => {
     for (const node of nodes) {
       if (node.is_directory) {
         collect(node.children ?? [])
       } else {
-        files.push({ name: node.name, path: node.path, modified: false })
+        files.push({
+          name: node.name,
+          path: node.path,
+          kind: node.kind!,
+          modified: false,
+        })
       }
     }
   }
@@ -397,9 +418,9 @@ export async function getFileTree(directory: string): Promise<FileTreeNode[]> {
   return buildTree(await existingCanonicalPath(directory))
 }
 
-export async function readExcalidrawFile(filePath: string): Promise<NativeFileContent> {
+export async function readDocumentFile(filePath: string): Promise<NativeFileContent> {
   const canonicalPath = await existingCanonicalPath(filePath)
-  validateExcalidrawPath(canonicalPath)
+  const kind = validateDocumentPath(canonicalPath)
   const handle = await fs.open(canonicalPath, 'r')
   try {
     const openedStats = await handle.stat({ bigint: true })
@@ -415,9 +436,9 @@ export async function readExcalidrawFile(filePath: string): Promise<NativeFileCo
       fileIdentity(finalStats) !== openedIdentity ||
       normalizePathKey(finalPath) !== normalizePathKey(canonicalPath)
     ) {
-      throw new Error('The drawing changed or was replaced while it was being read; retry the operation')
+      throw new Error('The document changed or was replaced while it was being read; retry the operation')
     }
-    validateExcalidrawContent(content)
+    validateDocumentContent(kind, content)
     return {
       content,
       contentHash: contentHash(content),
@@ -428,10 +449,10 @@ export async function readExcalidrawFile(filePath: string): Promise<NativeFileCo
   }
 }
 
-export async function saveExcalidrawFile(request: SaveFileRequest): Promise<NativeSaveResult> {
-  validateExcalidrawContent(request.content)
+export async function saveDocumentFile(request: SaveFileRequest): Promise<NativeSaveResult> {
   const canonicalPath = await existingCanonicalPath(request.filePath)
-  validateExcalidrawPath(canonicalPath)
+  const kind = validateDocumentPath(canonicalPath)
+  validateDocumentContent(kind, request.content)
   if (!request.expectedHash || !request.expectedIdentity) {
     throw new Error('Expected content hash and file identity are required')
   }
@@ -443,9 +464,14 @@ export async function saveExcalidrawFile(request: SaveFileRequest): Promise<Nati
   })
 }
 
-export async function saveExcalidrawFileAs(request: SaveFileAsRequest): Promise<NativeSaveResult> {
-  validateExcalidrawContent(request.content)
+export async function saveDocumentFileAs(request: SaveFileAsRequest): Promise<NativeSaveResult> {
   const destination = await destinationPath(request.filePath)
+  const destinationKind = validateDocumentPath(destination)
+  const sourceKind = validateDocumentPath(request.sourcePath)
+  if (destinationKind !== sourceKind) {
+    throw new Error('Save As must preserve the document type')
+  }
+  validateDocumentContent(destinationKind, request.content)
   if (
     request.forbiddenDirectory &&
     isWithinDirectory(destination, await existingCanonicalPath(request.forbiddenDirectory))
@@ -467,14 +493,22 @@ export async function saveExcalidrawFileAs(request: SaveFileAsRequest): Promise<
   })
 }
 
-export async function createNewFile(directory: string, fileName: string): Promise<string> {
+export async function createNewFile(
+  directory: string,
+  fileName: string,
+  kind: DocumentKind
+): Promise<string> {
   const root = await existingCanonicalPath(directory)
   const requestedName = safeName(fileName)
-  const normalizedName = requestedName.toLocaleLowerCase('en-US').endsWith('.excalidraw')
-    ? requestedName
-    : `${requestedName}.excalidraw`
-  const extension = '.excalidraw'
+  const normalizedName = ensureDocumentExtension(requestedName, kind)
+  if (documentKindFromPath(normalizedName) !== kind) {
+    throw new Error('The filename extension does not match the document type')
+  }
+  const extension = kind === 'markdown'
+    ? path.extname(normalizedName)
+    : '.excalidraw'
   const stem = normalizedName.slice(0, -extension.length)
+  const content = kind === 'markdown' ? '' : DEFAULT_DRAWING
   for (let suffix = 0; suffix <= 100; suffix += 1) {
     const candidateName = suffix === 0
       ? normalizedName
@@ -483,7 +517,7 @@ export async function createNewFile(directory: string, fileName: string): Promis
     try {
       const handle = await fs.open(candidate, 'wx')
       try {
-        await handle.writeFile(DEFAULT_DRAWING, 'utf8')
+        await handle.writeFile(content, 'utf8')
         await handle.sync()
       } finally {
         await handle.close()
@@ -513,11 +547,12 @@ export async function createNewFolder(directory: string, folderName: string): Pr
 
 export async function renameFile(oldPath: string, newName: string): Promise<string> {
   const canonicalPath = await existingCanonicalPath(oldPath)
-  validateExcalidrawPath(canonicalPath)
+  const kind = validateDocumentPath(canonicalPath)
   const requestedName = safeName(newName)
-  const finalName = requestedName.toLocaleLowerCase('en-US').endsWith('.excalidraw')
-    ? requestedName
-    : `${requestedName}.excalidraw`
+  const finalName = ensureDocumentExtension(requestedName, kind)
+  if (documentKindFromPath(finalName) !== kind) {
+    throw new Error('Rename must preserve the document type')
+  }
   const destination = path.join(path.dirname(canonicalPath), finalName)
   if (normalizePathKey(destination) !== normalizePathKey(canonicalPath) && await pathExists(destination)) {
     throw new Error('A file with that name already exists')
@@ -541,7 +576,7 @@ export async function renameFolder(oldPath: string, newName: string): Promise<st
 
 export async function deleteFile(filePath: string): Promise<void> {
   const canonicalPath = await existingCanonicalPath(filePath)
-  validateExcalidrawPath(canonicalPath)
+  validateDocumentPath(canonicalPath)
   await fs.unlink(canonicalPath)
 }
 

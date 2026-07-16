@@ -9,6 +9,7 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
   const userData = path.join(root, 'user-data')
   await fs.mkdir(workspace, { recursive: true })
   const drawingPath = path.join(workspace, 'Smoke.excalidraw')
+  const markdownPath = path.join(workspace, 'Notes.md')
   await fs.writeFile(drawingPath, JSON.stringify({
     type: 'excalidraw',
     version: 2,
@@ -17,6 +18,7 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
     appState: { viewBackgroundColor: '#ffffff' },
     files: {},
   }), 'utf8')
+  await fs.writeFile(markdownPath, '# Existing note\n', 'utf8')
 
   const executablePath = process.env.RACHANA_ELECTRON_EXECUTABLE
   const application = await electron.launch({
@@ -37,6 +39,37 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
     expect(await page.evaluate(() => Boolean(
       (window as Window & { rachana?: unknown }).rachana
     ))).toBe(true)
+
+    const newDocumentTrigger = page.locator('.tab-region').getByRole(
+      'button',
+      { name: 'New document' }
+    )
+    await expect(page.locator('.sidebar-actions').getByRole(
+      'button',
+      { name: 'New document' }
+    )).toBeVisible()
+    await newDocumentTrigger.click()
+    const newDocumentMenu = page.getByRole('menu', { name: 'New document' })
+    await expect(newDocumentMenu.getByRole('menuitem', {
+      name: 'New drawing',
+    })).toBeVisible()
+    await expect(newDocumentMenu.getByRole('menuitem', {
+      name: 'New note',
+    })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    const appMenuTrigger = page.getByRole('button', {
+      name: 'Open application menu',
+    })
+    await appMenuTrigger.click()
+    const appMenu = page.getByRole('menu', { name: 'Open application menu' })
+    await expect(appMenu).toBeVisible()
+    await expect(appMenu.getByRole('menuitem', { name: /^Save (?:Ctrl|⌘)/ }))
+      .toHaveAttribute('data-disabled', '')
+    await expect(appMenu.getByRole('menuitem', { name: /Canvas view/ }))
+      .toHaveAttribute('data-disabled', '')
+    await page.keyboard.press('Escape')
+
     await page.locator('.empty-primary-action').click()
     await expect(page.getByRole('treeitem', { name: /Smoke/ })).toBeVisible()
     await page.getByRole('treeitem', { name: /Smoke/ }).click()
@@ -87,6 +120,11 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
     await page.keyboard.press('Control+s')
     await expect(page.getByRole('status', { name: 'Document save status' }))
       .toHaveText('Saved')
+    await appMenuTrigger.click()
+    await expect(appMenu.getByRole('menuitem', { name: /Canvas view/ }))
+      .not.toHaveAttribute('data-disabled')
+    await page.keyboard.press('Escape')
+
     const saved = JSON.parse(await fs.readFile(drawingPath, 'utf8'))
     const visibleElements = saved.elements.filter(
       (element: { isDeleted?: boolean }) => !element.isDeleted
@@ -97,6 +135,52 @@ test('launches Chromium with the preload bridge and saves a drawing', async () =
       text: 'Hand drawn',
       fontFamily: 5,
     })
+
+    await page.getByRole('treeitem', { name: /^Notes/ }).click()
+    const markdownSource = page.locator('.markdown-source .cm-content')
+    await expect(markdownSource).toBeVisible()
+    await markdownSource.click()
+    await page.keyboard.press('Control+a')
+    await page.keyboard.insertText('# Markdown note\n\n- [x] saved locally')
+    await expect(page.getByRole('heading', { name: 'Markdown note' })).toBeVisible()
+    await expect(page.getByRole('checkbox')).toBeChecked()
+    await expect(page.getByRole('status', { name: 'Document save status' }))
+      .toHaveText('Unsaved changes')
+
+    await page.keyboard.press('Control+s')
+    await expect(page.getByRole('status', { name: 'Document save status' }))
+      .toHaveText('Saved')
+    await expect(fs.readFile(markdownPath, 'utf8')).resolves.toBe(
+      '# Markdown note\n\n- [x] saved locally'
+    )
+
+    await page.setViewportSize({ width: 760, height: 520 })
+    await appMenuTrigger.click()
+    await expect(appMenu).toBeVisible()
+    await expect(appMenu.getByText('Create', { exact: true })).toBeVisible()
+    await expect(appMenu.getByRole('menuitem', { name: /New note/ })).toBeVisible()
+    await expect(appMenu.getByRole('menuitem', { name: /^Save (?:Ctrl|⌘)/ }))
+      .not.toHaveAttribute('data-disabled')
+    await expect(appMenu.getByRole('menuitem', { name: /Canvas view/ }))
+      .toHaveAttribute('data-disabled', '')
+
+    await appMenu.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished)
+      )
+    })
+    const menuLayout = await appMenu.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return {
+        bottom: bounds.bottom,
+        height: window.innerHeight,
+        overflowY: getComputedStyle(element).overflowY,
+        top: bounds.top,
+      }
+    })
+    expect(menuLayout.top).toBeGreaterThanOrEqual(0)
+    expect(menuLayout.bottom).toBeLessThanOrEqual(menuLayout.height)
+    expect(menuLayout.overflowY).toBe('auto')
   } finally {
     await application.close()
     await fs.rm(root, { recursive: true, force: true })

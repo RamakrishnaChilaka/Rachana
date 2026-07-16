@@ -21,8 +21,8 @@ const api: RachanaNativeApi = {
         isDirectory,
         candidatePaths
       ),
-    createFile: (directory, fileName) =>
-      ipcRenderer.invoke(IPC.workspaceCreateFile, directory, fileName),
+    createFile: (directory, fileName, kind) =>
+      ipcRenderer.invoke(IPC.workspaceCreateFile, directory, fileName, kind),
     createFolder: (directory, folderName) =>
       ipcRenderer.invoke(IPC.workspaceCreateFolder, directory, folderName),
     renameFile: (oldPath, newName) =>
@@ -35,7 +35,7 @@ const api: RachanaNativeApi = {
   files: {
     read: (filePath) => ipcRenderer.invoke(IPC.filesRead, filePath),
     save: (request) => ipcRenderer.invoke(IPC.filesSave, request),
-    selectSavePath: () => ipcRenderer.invoke(IPC.filesSelectSavePath),
+    selectSavePath: (kind) => ipcRenderer.invoke(IPC.filesSelectSavePath, kind),
     saveAs: (request) => ipcRenderer.invoke(IPC.filesSaveAs, request),
   },
   preferences: {
